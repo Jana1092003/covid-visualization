@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard 1 – COVID-19 Global Snapshot</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://d3js.org/topojson.v3.min.js"></script>
+<script src="https://d3js.org/d3-scale-chromatic.v3.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI',sans-serif; background:#0d1117; color:#e6edf3; }
+
+/* TOP BAR */
+.topbar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 28px; background:#161b22; border-bottom:1px solid #30363d;
+  position:sticky; top:0; z-index:100;
+}
+.topbar h1 { font-size:1rem; color:#58a6ff; }
+.topbar-right { display:flex; align-items:center; gap:14px; }
+.back-btn {
+  background:#21262d; border:1px solid #30363d; color:#e6edf3;
+  padding:6px 14px; border-radius:6px; cursor:pointer; font-size:0.85rem;
+  text-decoration:none;
+}
+.back-btn:hover { border-color:#58a6ff; }
+select {
+  background:#21262d; border:1px solid #30363d; color:#e6edf3;
+  padding:6px 12px; border-radius:6px; font-size:0.85rem; cursor:pointer;
+}
+.clear-btn {
+  background:#21262d; border:1px solid #f85149; color:#f85149;
+  padding:6px 14px; border-radius:6px; cursor:pointer; font-size:0.85rem;
+}
+.clear-btn:hover { background:#f8514920; }
+.fs-btn {
+  background:#21262d; border:1px solid #30363d; color:#e6edf3;
+  padding:6px 10px; border-radius:6px; cursor:pointer; font-size:1rem;
+}
+
+/* KPI CARDS */
+.kpi-row {
+  display:flex; gap:16px; padding:18px 28px; flex-wrap:wrap;
+}
+.kpi-card {
+  flex:1; min-width:150px; background:#161b22; border:1px solid #30363d;
+  border-radius:10px; padding:14px 18px;
+}
+.kpi-card .label { font-size:0.75rem; color:#8b949e; margin-bottom:4px; }
+.kpi-card .value { font-size:1.5rem; font-weight:700; }
+.kpi-card.confirmed .value { color:#58a6ff; }
+.kpi-card.deaths .value { color:#f85149; }
+.kpi-card.tests .value { color:#3fb950; }
+.kpi-card.rate .value { color:#d29922; }
+
+/* GRID */
+.grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  grid-template-rows:auto auto;
+  gap:16px; padding:0 28px 28px;
+}
+.chart-box {
+  background:#161b22; border:1px solid #30363d;
+  border-radius:12px; padding:16px; overflow:hidden;
+}
+.chart-box.wide { grid-column:1/3; }
+.chart-box h3 { font-size:0.9rem; color:#8b949e; margin-bottom:12px; }
+.chart-box h3 span { color:#e6edf3; font-weight:600; }
+
+/* TOOLTIP */
+.tooltip {
+  position:fixed; background:#1c2128; border:1px solid #30363d;
+  border-radius:8px; padding:10px 14px; font-size:0.82rem;
+  pointer-events:none; opacity:0; transition:opacity 0.15s;
+  max-width:220px; z-index:999; line-height:1.7;
+}
+
+/* LEGEND */
+.legend { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.legend-item { display:flex; align-items:center; gap:5px; font-size:0.78rem; color:#8b949e; cursor:pointer; }
+.legend-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+
+/* SELECTED INFO */
+.selected-badge {
+  background:#1f6feb33; border:1px solid #58a6ff44;
+  border-radius:6px; padding:4px 10px; font-size:0.8rem; color:#58a6ff;
+  display:none;
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>🌍 Dashboard 1 — Global Snapshot: Testing vs Mortality</h1>
+  <div class="topbar-right">
+    <span class="selected-badge" id="selectedBadge">All Countries</span>
+    <label style="font-size:0.82rem;color:#8b949e;">Metric:</label>
+    <select id="metricSelect">
+      <option value="Deaths/1M pop">Deaths per 1M</option>
+      <option value="Tot Cases/1M pop">Cases per 1M</option>
+      <option value="Tests/1M pop">Tests per 1M</option>
+      <option value="DeathRate">Death Rate (%)</option>
+      <option value="TestPositivityRate">Test Positivity (%)</option>
+      <option value="RecoveryRate">Recovery Rate (%)</option>
+    </select>
+    <button class="clear-btn" onclick="clearFilters()">✕ Clear Filters</button>
+    <button class="fs-btn" onclick="toggleFS()">⛶</button>
+    <a href="dashboard2.html" class="back-btn">→ Dashboard 2</a>
+    <a href="index.html" class="back-btn">⌂ Home</a>
+  </div>
+</div>
+
+<div class="kpi-row" id="kpiRow">
+  <div class="kpi-card confirmed"><div class="label">Total Confirmed</div><div class="value" id="kpiConfirmed">–</div></div>
+  <div class="kpi-card deaths"><div class="label">Total Deaths</div><div class="value" id="kpiDeaths">–</div></div>
+  <div class="kpi-card tests"><div class="label">Total Tests</div><div class="value" id="kpiTests">–</div></div>
+  <div class="kpi-card rate"><div class="label">Avg Death Rate</div><div class="value" id="kpiRate">–</div></div>
+  <div class="kpi-card" style=""><div class="label">Countries</div><div class="value" id="kpiCountries" style="color:#a371f7">–</div></div>
+</div>
+
+<div class="grid">
+  <!-- MAP -->
+  <div class="chart-box wide">
+    <h3><span>World Heatmap</span> — color = selected metric &nbsp;<span style="color:#58a6ff;font-size:0.8rem">(click country to filter)</span></h3>
+    <div id="mapContainer"></div>
+    <div id="mapLegend" style="margin-top:8px"></div>
+  </div>
+
+  <!-- BUBBLE -->
+  <div class="chart-box">
+    <h3><span>Tests/1M vs Deaths/1M</span> — bubble size = population</h3>
+    <div id="bubbleContainer"></div>
+    <div class="legend" id="bubbleLegend"></div>
+  </div>
+
+  <!-- BAR -->
+  <div class="chart-box">
+    <h3><span>Top 20 Countries</span> — by selected metric</h3>
+    <div id="barContainer"></div>
+  </div>
+
+  <!-- DONUT -->
+  <div class="chart-box">
+    <h3><span>Share by Continent</span> — selected metric &nbsp;<span style="color:#58a6ff;font-size:0.8rem">(click to filter)</span></h3>
+    <div id="donutContainer"></div>
+  </div>
+
+  <!-- SCATTER: DeathRate vs TestPositivity -->
+  <div class="chart-box">
+    <h3><span>Death Rate vs Test Positivity Rate</span> — by country</h3>
+    <div id="scatterContainer"></div>
+    <div class="legend" id="scatterLegend"></div>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ─── GLOBALS ───
+const CONT_COLORS = {
+  'Africa':'#f78166',
+  'Asia':'#58a6ff',
+  'Europe':'#3fb950',
+  'North America':'#d29922',
+  'South America':'#a371f7',
+  'Australia/Oceania':'#39c5cf'
+};
+let allData = [];
+let selectedContinent = null;
+let selectedCountry = null;
+let currentMetric = 'Deaths/1M pop';
+
+const fmt = d3.format(',');
+const fmtM = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v;
+
+// ─── TOOLTIP ───
+const tip = d3.select('#tooltip');
+function showTip(html, event) {
+  tip.html(html).style('opacity',1)
+    .style('left',(event.clientX+14)+'px')
+    .style('top',(event.clientY-10)+'px');
+}
+function hideTip() { tip.style('opacity',0); }
+
+// ─── LOAD DATA ───
+const __WORLD_DATA__ = [{"Country": "United States", "Continent": "North America", "Population": 331198130.0, "TotalCases": 5032179, "NewCases": NaN, "TotalDeaths": 162804.0, "NewDeaths": NaN, "TotalRecovered": 2576668.0, "NewRecovered": NaN, "ActiveCases": 2292707.0, "Serious,Critical": 18296.0, "Tot Cases/1M pop": 15194.0, "Deaths/1M pop": 492.0, "TotalTests": 63139605.0, "Tests/1M pop": 190640.0, "WHO Region": "Americas", "TestPositivityRate": 7.97, "DeathRate": 3.24, "RecoveryRate": 51.2}, {"Country": "Brazil", "Continent": "South America", "Population": 212710692.0, "TotalCases": 2917562, "NewCases": NaN, "TotalDeaths": 98644.0, "NewDeaths": NaN, "TotalRecovered": 2047660.0, "NewRecovered": NaN, "ActiveCases": 771258.0, "Serious,Critical": 8318.0, "Tot Cases/1M pop": 13716.0, "Deaths/1M pop": 464.0, "TotalTests": 13206188.0, "Tests/1M pop": 62085.0, "WHO Region": "Americas", "TestPositivityRate": 22.09, "DeathRate": 3.38, "RecoveryRate": 70.18}, {"Country": "India", "Continent": "Asia", "Population": 1381344997.0, "TotalCases": 2025409, "NewCases": NaN, "TotalDeaths": 41638.0, "NewDeaths": NaN, "TotalRecovered": 1377384.0, "NewRecovered": NaN, "ActiveCases": 606387.0, "Serious,Critical": 8944.0, "Tot Cases/1M pop": 1466.0, "Deaths/1M pop": 30.0, "TotalTests": 22149351.0, "Tests/1M pop": 16035.0, "WHO Region": "South-EastAsia", "TestPositivityRate": 9.14, "DeathRate": 2.06, "RecoveryRate": 68.01}, {"Country": "Russia", "Continent": "Europe", "Population": 145940924.0, "TotalCases": 871894, "NewCases": NaN, "TotalDeaths": 14606.0, "NewDeaths": NaN, "TotalRecovered": 676357.0, "NewRecovered": NaN, "ActiveCases": 180931.0, "Serious,Critical": 2300.0, "Tot Cases/1M pop": 5974.0, "Deaths/1M pop": 100.0, "TotalTests": 29716907.0, "Tests/1M pop": 203623.0, "WHO Region": "Europe", "TestPositivityRate": 2.93, "DeathRate": 1.68, "RecoveryRate": 77.57}, {"Country": "South Africa", "Continent": "Africa", "Population": 59381566.0, "TotalCases": 538184, "NewCases": NaN, "TotalDeaths": 9604.0, "NewDeaths": NaN, "TotalRecovered": 387316.0, "NewRecovered": NaN, "ActiveCases": 141264.0, "Serious,Critical": 539.0, "Tot Cases/1M pop": 9063.0, "Deaths/1M pop": 162.0, "TotalTests": 3149807.0, "Tests/1M pop": 53044.0, "WHO Region": "Africa", "TestPositivityRate": 17.09, "DeathRate": 1.78, "RecoveryRate": 71.97}, {"Country": "Mexico", "Continent": "North America", "Population": 129066160.0, "TotalCases": 462690, "NewCases": 6590.0, "TotalDeaths": 50517.0, "NewDeaths": 819.0, "TotalRecovered": 308848.0, "NewRecovered": 4140.0, "ActiveCases": 103325.0, "Serious,Critical": 3987.0, "Tot Cases/1M pop": 3585.0, "Deaths/1M pop": 391.0, "TotalTests": 1056915.0, "Tests/1M pop": 8189.0, "WHO Region": "Americas", "TestPositivityRate": 43.78, "DeathRate": 10.92, "RecoveryRate": 66.75}, {"Country": "Peru", "Continent": "South America", "Population": 33016319.0, "TotalCases": 455409, "NewCases": NaN, "TotalDeaths": 20424.0, "NewDeaths": NaN, "TotalRecovered": 310337.0, "NewRecovered": NaN, "ActiveCases": 124648.0, "Serious,Critical": 1426.0, "Tot Cases/1M pop": 13793.0, "Deaths/1M pop": 619.0, "TotalTests": 2493429.0, "Tests/1M pop": 75521.0, "WHO Region": "Americas", "TestPositivityRate": 18.26, "DeathRate": 4.48, "RecoveryRate": 68.14}, {"Country": "Chile", "Continent": "South America", "Population": 19132514.0, "TotalCases": 366671, "NewCases": NaN, "TotalDeaths": 9889.0, "NewDeaths": NaN, "TotalRecovered": 340168.0, "NewRecovered": NaN, "ActiveCases": 16614.0, "Serious,Critical": 1358.0, "Tot Cases/1M pop": 19165.0, "Deaths/1M pop": 517.0, "TotalTests": 1760615.0, "Tests/1M pop": 92022.0, "WHO Region": "Americas", "TestPositivityRate": 20.83, "DeathRate": 2.7, "RecoveryRate": 92.77}, {"Country": "Colombia", "Continent": "South America", "Population": 50936262.0, "TotalCases": 357710, "NewCases": NaN, "TotalDeaths": 11939.0, "NewDeaths": NaN, "TotalRecovered": 192355.0, "NewRecovered": NaN, "ActiveCases": 153416.0, "Serious,Critical": 1493.0, "Tot Cases/1M pop": 7023.0, "Deaths/1M pop": 234.0, "TotalTests": 1801835.0, "Tests/1M pop": 35374.0, "WHO Region": "Americas", "TestPositivityRate": 19.85, "DeathRate": 3.34, "RecoveryRate": 53.77}, {"Country": "Spain", "Continent": "Europe", "Population": 46756648.0, "TotalCases": 354530, "NewCases": NaN, "TotalDeaths": 28500.0, "NewDeaths": NaN, "TotalRecovered": NaN, "NewRecovered": NaN, "ActiveCases": NaN, "Serious,Critical": 617.0, "Tot Cases/1M pop": 7582.0, "Deaths/1M pop": 610.0, "TotalTests": 7064329.0, "Tests/1M pop": 151087.0, "WHO Region": "Europe", "TestPositivityRate": 5.02, "DeathRate": 8.04, "RecoveryRate": NaN}, {"Country": "Iran", "Continent": "Asia", "Population": 84097623.0, "TotalCases": 320117, "NewCases": NaN, "TotalDeaths": 17976.0, "NewDeaths": NaN, "TotalRecovered": 277463.0, "NewRecovered": NaN, "ActiveCases": 24678.0, "Serious,Critical": 4156.0, "Tot Cases/1M pop": 3806.0, "Deaths/1M pop": 214.0, "TotalTests": 2612763.0, "Tests/1M pop": 31068.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 12.25, "DeathRate": 5.62, "RecoveryRate": 86.68}, {"Country": "United Kingdom", "Continent": "Europe", "Population": 67922029.0, "TotalCases": 308134, "NewCases": NaN, "TotalDeaths": 46413.0, "NewDeaths": NaN, "TotalRecovered": NaN, "NewRecovered": NaN, "ActiveCases": NaN, "Serious,Critical": 73.0, "Tot Cases/1M pop": 4537.0, "Deaths/1M pop": 683.0, "TotalTests": 17515234.0, "Tests/1M pop": 257873.0, "WHO Region": "Europe", "TestPositivityRate": 1.76, "DeathRate": 15.06, "RecoveryRate": NaN}, {"Country": "Saudi Arabia", "Continent": "Asia", "Population": 34865919.0, "TotalCases": 284226, "NewCases": NaN, "TotalDeaths": 3055.0, "NewDeaths": NaN, "TotalRecovered": 247089.0, "NewRecovered": NaN, "ActiveCases": 34082.0, "Serious,Critical": 1915.0, "Tot Cases/1M pop": 8152.0, "Deaths/1M pop": 88.0, "TotalTests": 3635705.0, "Tests/1M pop": 104277.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 7.82, "DeathRate": 1.07, "RecoveryRate": 86.93}, {"Country": "Pakistan", "Continent": "Asia", "Population": 221295851.0, "TotalCases": 281863, "NewCases": NaN, "TotalDeaths": 6035.0, "NewDeaths": NaN, "TotalRecovered": 256058.0, "NewRecovered": NaN, "ActiveCases": 19770.0, "Serious,Critical": 809.0, "Tot Cases/1M pop": 1274.0, "Deaths/1M pop": 27.0, "TotalTests": 2058872.0, "Tests/1M pop": 9304.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 13.69, "DeathRate": 2.14, "RecoveryRate": 90.84}, {"Country": "Bangladesh", "Continent": "Asia", "Population": 164851401.0, "TotalCases": 249651, "NewCases": NaN, "TotalDeaths": 3306.0, "NewDeaths": NaN, "TotalRecovered": 143824.0, "NewRecovered": NaN, "ActiveCases": 102521.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 1514.0, "Deaths/1M pop": 20.0, "TotalTests": 1225124.0, "Tests/1M pop": 7432.0, "WHO Region": "South-EastAsia", "TestPositivityRate": 20.38, "DeathRate": 1.32, "RecoveryRate": 57.61}, {"Country": "Italy", "Continent": "Europe", "Population": 60452568.0, "TotalCases": 249204, "NewCases": NaN, "TotalDeaths": 35187.0, "NewDeaths": NaN, "TotalRecovered": 201323.0, "NewRecovered": NaN, "ActiveCases": 12694.0, "Serious,Critical": 42.0, "Tot Cases/1M pop": 4122.0, "Deaths/1M pop": 582.0, "TotalTests": 7099713.0, "Tests/1M pop": 117443.0, "WHO Region": "Europe", "TestPositivityRate": 3.51, "DeathRate": 14.12, "RecoveryRate": 80.79}, {"Country": "Turkey", "Continent": "Asia", "Population": 84428331.0, "TotalCases": 237265, "NewCases": NaN, "TotalDeaths": 5798.0, "NewDeaths": NaN, "TotalRecovered": 220546.0, "NewRecovered": NaN, "ActiveCases": 10921.0, "Serious,Critical": 580.0, "Tot Cases/1M pop": 2810.0, "Deaths/1M pop": 69.0, "TotalTests": 5081802.0, "Tests/1M pop": 60191.0, "WHO Region": "Europe", "TestPositivityRate": 4.67, "DeathRate": 2.44, "RecoveryRate": 92.95}, {"Country": "Argentina", "Continent": "South America", "Population": 45236884.0, "TotalCases": 228195, "NewCases": NaN, "TotalDeaths": 4251.0, "NewDeaths": NaN, "TotalRecovered": 99852.0, "NewRecovered": NaN, "ActiveCases": 124092.0, "Serious,Critical": 1150.0, "Tot Cases/1M pop": 5044.0, "Deaths/1M pop": 94.0, "TotalTests": 794544.0, "Tests/1M pop": 17564.0, "WHO Region": "Americas", "TestPositivityRate": 28.72, "DeathRate": 1.86, "RecoveryRate": 43.76}, {"Country": "Germany", "Continent": "Europe", "Population": 83811260.0, "TotalCases": 215210, "NewCases": NaN, "TotalDeaths": 9252.0, "NewDeaths": NaN, "TotalRecovered": 196200.0, "NewRecovered": NaN, "ActiveCases": 9758.0, "Serious,Critical": 236.0, "Tot Cases/1M pop": 2568.0, "Deaths/1M pop": 110.0, "TotalTests": 8586648.0, "Tests/1M pop": 102452.0, "WHO Region": "Europe", "TestPositivityRate": 2.51, "DeathRate": 4.3, "RecoveryRate": 91.17}, {"Country": "France", "Continent": "Europe", "Population": 65288306.0, "TotalCases": 195633, "NewCases": NaN, "TotalDeaths": 30312.0, "NewDeaths": NaN, "TotalRecovered": 82460.0, "NewRecovered": NaN, "ActiveCases": 82861.0, "Serious,Critical": 384.0, "Tot Cases/1M pop": 2996.0, "Deaths/1M pop": 464.0, "TotalTests": 3992206.0, "Tests/1M pop": 61147.0, "WHO Region": "Europe", "TestPositivityRate": 4.9, "DeathRate": 15.49, "RecoveryRate": 42.15}, {"Country": "Iraq", "Continent": "Asia", "Population": 40306025.0, "TotalCases": 140603, "NewCases": NaN, "TotalDeaths": 5161.0, "NewDeaths": NaN, "TotalRecovered": 101025.0, "NewRecovered": NaN, "ActiveCases": 34417.0, "Serious,Critical": 517.0, "Tot Cases/1M pop": 3488.0, "Deaths/1M pop": 128.0, "TotalTests": 1092741.0, "Tests/1M pop": 27111.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 12.87, "DeathRate": 3.67, "RecoveryRate": 71.85}, {"Country": "Philippines", "Continent": "Asia", "Population": 109722719.0, "TotalCases": 119460, "NewCases": NaN, "TotalDeaths": 2150.0, "NewDeaths": NaN, "TotalRecovered": 66837.0, "NewRecovered": NaN, "ActiveCases": 50473.0, "Serious,Critical": 239.0, "Tot Cases/1M pop": 1089.0, "Deaths/1M pop": 20.0, "TotalTests": 1669996.0, "Tests/1M pop": 15220.0, "WHO Region": "WesternPacific", "TestPositivityRate": 7.15, "DeathRate": 1.8, "RecoveryRate": 55.95}, {"Country": "Indonesia", "Continent": "Asia", "Population": 273808365.0, "TotalCases": 118753, "NewCases": NaN, "TotalDeaths": 5521.0, "NewDeaths": NaN, "TotalRecovered": 75645.0, "NewRecovered": NaN, "ActiveCases": 37587.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 434.0, "Deaths/1M pop": 20.0, "TotalTests": 1633156.0, "Tests/1M pop": 5965.0, "WHO Region": "South-EastAsia", "TestPositivityRate": 7.27, "DeathRate": 4.65, "RecoveryRate": 63.7}, {"Country": "Canada", "Continent": "North America", "Population": 37775022.0, "TotalCases": 118561, "NewCases": NaN, "TotalDeaths": 8966.0, "NewDeaths": NaN, "TotalRecovered": 103106.0, "NewRecovered": NaN, "ActiveCases": 6489.0, "Serious,Critical": 2263.0, "Tot Cases/1M pop": 3139.0, "Deaths/1M pop": 237.0, "TotalTests": 4319172.0, "Tests/1M pop": 114339.0, "WHO Region": "Americas", "TestPositivityRate": 2.74, "DeathRate": 7.56, "RecoveryRate": 86.96}, {"Country": "Qatar", "Continent": "Asia", "Population": 2807805.0, "TotalCases": 112092, "NewCases": NaN, "TotalDeaths": 178.0, "NewDeaths": NaN, "TotalRecovered": 108831.0, "NewRecovered": NaN, "ActiveCases": 3083.0, "Serious,Critical": 77.0, "Tot Cases/1M pop": 39922.0, "Deaths/1M pop": 63.0, "TotalTests": 511000.0, "Tests/1M pop": 181993.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 21.94, "DeathRate": 0.16, "RecoveryRate": 97.09}, {"Country": "Kazakhstan", "Continent": "Asia", "Population": 18798667.0, "TotalCases": 95942, "NewCases": NaN, "TotalDeaths": 1058.0, "NewDeaths": NaN, "TotalRecovered": 68871.0, "NewRecovered": NaN, "ActiveCases": 26013.0, "Serious,Critical": 221.0, "Tot Cases/1M pop": 5104.0, "Deaths/1M pop": 56.0, "TotalTests": 2163713.0, "Tests/1M pop": 115099.0, "WHO Region": "Europe", "TestPositivityRate": 4.43, "DeathRate": 1.1, "RecoveryRate": 71.78}, {"Country": "Egypt", "Continent": "Africa", "Population": 102516525.0, "TotalCases": 95006, "NewCases": NaN, "TotalDeaths": 4951.0, "NewDeaths": NaN, "TotalRecovered": 48898.0, "NewRecovered": NaN, "ActiveCases": 41157.0, "Serious,Critical": 41.0, "Tot Cases/1M pop": 927.0, "Deaths/1M pop": 48.0, "TotalTests": 135000.0, "Tests/1M pop": 1317.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 70.37, "DeathRate": 5.21, "RecoveryRate": 51.47}, {"Country": "Ecuador", "Continent": "South America", "Population": 17668824.0, "TotalCases": 90537, "NewCases": NaN, "TotalDeaths": 5877.0, "NewDeaths": NaN, "TotalRecovered": 71318.0, "NewRecovered": NaN, "ActiveCases": 13342.0, "Serious,Critical": 378.0, "Tot Cases/1M pop": 5124.0, "Deaths/1M pop": 333.0, "TotalTests": 258582.0, "Tests/1M pop": 14635.0, "WHO Region": "Americas", "TestPositivityRate": 35.01, "DeathRate": 6.49, "RecoveryRate": 78.77}, {"Country": "Bolivia", "Continent": "South America", "Population": 11688459.0, "TotalCases": 86423, "NewCases": 1282.0, "TotalDeaths": 3465.0, "NewDeaths": 80.0, "TotalRecovered": 27373.0, "NewRecovered": 936.0, "ActiveCases": 55585.0, "Serious,Critical": 71.0, "Tot Cases/1M pop": 7394.0, "Deaths/1M pop": 296.0, "TotalTests": 183583.0, "Tests/1M pop": 15706.0, "WHO Region": "Americas", "TestPositivityRate": 47.08, "DeathRate": 4.01, "RecoveryRate": 31.67}, {"Country": "Sweden", "Continent": "Europe", "Population": 10105596.0, "TotalCases": 81967, "NewCases": NaN, "TotalDeaths": 5766.0, "NewDeaths": NaN, "TotalRecovered": NaN, "NewRecovered": NaN, "ActiveCases": NaN, "Serious,Critical": 38.0, "Tot Cases/1M pop": 8111.0, "Deaths/1M pop": 571.0, "TotalTests": 863315.0, "Tests/1M pop": 85429.0, "WHO Region": "Europe", "TestPositivityRate": 9.49, "DeathRate": 7.03, "RecoveryRate": NaN}, {"Country": "Oman", "Continent": "Asia", "Population": 5118446.0, "TotalCases": 80713, "NewCases": NaN, "TotalDeaths": 492.0, "NewDeaths": NaN, "TotalRecovered": 70910.0, "NewRecovered": NaN, "ActiveCases": 9311.0, "Serious,Critical": 177.0, "Tot Cases/1M pop": 15769.0, "Deaths/1M pop": 96.0, "TotalTests": 309212.0, "Tests/1M pop": 60411.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 26.1, "DeathRate": 0.61, "RecoveryRate": 87.85}, {"Country": "Israel", "Continent": "Asia", "Population": 9197590.0, "TotalCases": 79559, "NewCases": NaN, "TotalDeaths": 576.0, "NewDeaths": NaN, "TotalRecovered": 53427.0, "NewRecovered": NaN, "ActiveCases": 25556.0, "Serious,Critical": 358.0, "Tot Cases/1M pop": 8650.0, "Deaths/1M pop": 63.0, "TotalTests": 1872453.0, "Tests/1M pop": 203581.0, "WHO Region": "Europe", "TestPositivityRate": 4.25, "DeathRate": 0.72, "RecoveryRate": 67.15}, {"Country": "Ukraine", "Continent": "Europe", "Population": 43705858.0, "TotalCases": 76808, "NewCases": NaN, "TotalDeaths": 1819.0, "NewDeaths": NaN, "TotalRecovered": 42524.0, "NewRecovered": NaN, "ActiveCases": 32465.0, "Serious,Critical": 158.0, "Tot Cases/1M pop": 1757.0, "Deaths/1M pop": 42.0, "TotalTests": 1116641.0, "Tests/1M pop": 25549.0, "WHO Region": "Europe", "TestPositivityRate": 6.88, "DeathRate": 2.37, "RecoveryRate": 55.36}, {"Country": "Dominican Republic", "Continent": "North America", "Population": 10858648.0, "TotalCases": 76536, "NewCases": NaN, "TotalDeaths": 1246.0, "NewDeaths": NaN, "TotalRecovered": 40539.0, "NewRecovered": NaN, "ActiveCases": 34751.0, "Serious,Critical": 317.0, "Tot Cases/1M pop": 7048.0, "Deaths/1M pop": 115.0, "TotalTests": 281926.0, "Tests/1M pop": 25963.0, "WHO Region": "Americas", "TestPositivityRate": 27.15, "DeathRate": 1.63, "RecoveryRate": 52.97}, {"Country": "Panama", "Continent": "North America", "Population": 4321282.0, "TotalCases": 71418, "NewCases": NaN, "TotalDeaths": 1574.0, "NewDeaths": NaN, "TotalRecovered": 45658.0, "NewRecovered": NaN, "ActiveCases": 24186.0, "Serious,Critical": 161.0, "Tot Cases/1M pop": 16527.0, "Deaths/1M pop": 364.0, "TotalTests": 240995.0, "Tests/1M pop": 55769.0, "WHO Region": "Americas", "TestPositivityRate": 29.63, "DeathRate": 2.2, "RecoveryRate": 63.93}, {"Country": "Belgium", "Continent": "Europe", "Population": 11594739.0, "TotalCases": 71158, "NewCases": NaN, "TotalDeaths": 9859.0, "NewDeaths": NaN, "TotalRecovered": 17661.0, "NewRecovered": NaN, "ActiveCases": 43638.0, "Serious,Critical": 61.0, "Tot Cases/1M pop": 6137.0, "Deaths/1M pop": 850.0, "TotalTests": 1767120.0, "Tests/1M pop": 152407.0, "WHO Region": "Europe", "TestPositivityRate": 4.03, "DeathRate": 13.86, "RecoveryRate": 24.82}, {"Country": "Kuwait", "Continent": "Asia", "Population": 4276658.0, "TotalCases": 70045, "NewCases": NaN, "TotalDeaths": 469.0, "NewDeaths": NaN, "TotalRecovered": 61610.0, "NewRecovered": NaN, "ActiveCases": 7966.0, "Serious,Critical": 127.0, "Tot Cases/1M pop": 16378.0, "Deaths/1M pop": 110.0, "TotalTests": 522200.0, "Tests/1M pop": 122105.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 13.41, "DeathRate": 0.67, "RecoveryRate": 87.96}, {"Country": "Belarus", "Continent": "Europe", "Population": 9449001.0, "TotalCases": 68503, "NewCases": NaN, "TotalDeaths": 580.0, "NewDeaths": NaN, "TotalRecovered": 63756.0, "NewRecovered": NaN, "ActiveCases": 4167.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 7250.0, "Deaths/1M pop": 61.0, "TotalTests": 1344303.0, "Tests/1M pop": 142269.0, "WHO Region": "Europe", "TestPositivityRate": 5.1, "DeathRate": 0.85, "RecoveryRate": 93.07}, {"Country": "United Arab Emirates", "Continent": "Asia", "Population": 9902079.0, "TotalCases": 61845, "NewCases": NaN, "TotalDeaths": 354.0, "NewDeaths": NaN, "TotalRecovered": 55739.0, "NewRecovered": NaN, "ActiveCases": 5752.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 6246.0, "Deaths/1M pop": 36.0, "TotalTests": 5262658.0, "Tests/1M pop": 531470.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 1.18, "DeathRate": 0.57, "RecoveryRate": 90.13}, {"Country": "Romania", "Continent": "Europe", "Population": 19224023.0, "TotalCases": 57895, "NewCases": NaN, "TotalDeaths": 2566.0, "NewDeaths": NaN, "TotalRecovered": 28992.0, "NewRecovered": NaN, "ActiveCases": 26337.0, "Serious,Critical": 458.0, "Tot Cases/1M pop": 3012.0, "Deaths/1M pop": 133.0, "TotalTests": 1319369.0, "Tests/1M pop": 68631.0, "WHO Region": "Europe", "TestPositivityRate": 4.39, "DeathRate": 4.43, "RecoveryRate": 50.08}, {"Country": "Netherlands", "Continent": "Europe", "Population": 17138756.0, "TotalCases": 56982, "NewCases": NaN, "TotalDeaths": 6153.0, "NewDeaths": NaN, "TotalRecovered": NaN, "NewRecovered": NaN, "ActiveCases": NaN, "Serious,Critical": 37.0, "Tot Cases/1M pop": 3325.0, "Deaths/1M pop": 359.0, "TotalTests": 1079860.0, "Tests/1M pop": 63007.0, "WHO Region": "Europe", "TestPositivityRate": 5.28, "DeathRate": 10.8, "RecoveryRate": NaN}, {"Country": "Singapore", "Continent": "Asia", "Population": 5854932.0, "TotalCases": 54555, "NewCases": NaN, "TotalDeaths": 27.0, "NewDeaths": NaN, "TotalRecovered": 48031.0, "NewRecovered": NaN, "ActiveCases": 6497.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 9318.0, "Deaths/1M pop": 5.0, "TotalTests": 1474372.0, "Tests/1M pop": 251817.0, "WHO Region": "WesternPacific", "TestPositivityRate": 3.7, "DeathRate": 0.05, "RecoveryRate": 88.04}, {"Country": "Guatemala", "Continent": "North America", "Population": 17946899.0, "TotalCases": 54339, "NewCases": NaN, "TotalDeaths": 2119.0, "NewDeaths": NaN, "TotalRecovered": 42070.0, "NewRecovered": NaN, "ActiveCases": 10150.0, "Serious,Critical": 5.0, "Tot Cases/1M pop": 3028.0, "Deaths/1M pop": 118.0, "TotalTests": 172712.0, "Tests/1M pop": 9624.0, "WHO Region": "Americas", "TestPositivityRate": 31.46, "DeathRate": 3.9, "RecoveryRate": 77.42}, {"Country": "Portugal", "Continent": "Europe", "Population": 10193593.0, "TotalCases": 52061, "NewCases": NaN, "TotalDeaths": 1743.0, "NewDeaths": NaN, "TotalRecovered": 37840.0, "NewRecovered": NaN, "ActiveCases": 12478.0, "Serious,Critical": 42.0, "Tot Cases/1M pop": 5107.0, "Deaths/1M pop": 171.0, "TotalTests": 1705474.0, "Tests/1M pop": 167308.0, "WHO Region": "Europe", "TestPositivityRate": 3.05, "DeathRate": 3.35, "RecoveryRate": 72.68}, {"Country": "Poland", "Continent": "Europe", "Population": 37842302.0, "TotalCases": 49515, "NewCases": NaN, "TotalDeaths": 1774.0, "NewDeaths": NaN, "TotalRecovered": 35642.0, "NewRecovered": NaN, "ActiveCases": 12099.0, "Serious,Critical": 72.0, "Tot Cases/1M pop": 1308.0, "Deaths/1M pop": 47.0, "TotalTests": 2374686.0, "Tests/1M pop": 62752.0, "WHO Region": "Europe", "TestPositivityRate": 2.09, "DeathRate": 3.58, "RecoveryRate": 71.98}, {"Country": "Nigeria", "Continent": "Africa", "Population": 206606300.0, "TotalCases": 45244, "NewCases": NaN, "TotalDeaths": 930.0, "NewDeaths": NaN, "TotalRecovered": 32430.0, "NewRecovered": NaN, "ActiveCases": 11884.0, "Serious,Critical": 7.0, "Tot Cases/1M pop": 219.0, "Deaths/1M pop": 5.0, "TotalTests": 306894.0, "Tests/1M pop": 1485.0, "WHO Region": "Africa", "TestPositivityRate": 14.74, "DeathRate": 2.06, "RecoveryRate": 71.68}, {"Country": "Honduras", "Continent": "North America", "Population": 9919704.0, "TotalCases": 45098, "NewCases": NaN, "TotalDeaths": 1423.0, "NewDeaths": NaN, "TotalRecovered": 6116.0, "NewRecovered": NaN, "ActiveCases": 37559.0, "Serious,Critical": 52.0, "Tot Cases/1M pop": 4546.0, "Deaths/1M pop": 143.0, "TotalTests": 109292.0, "Tests/1M pop": 11018.0, "WHO Region": "Americas", "TestPositivityRate": 41.26, "DeathRate": 3.16, "RecoveryRate": 13.56}, {"Country": "Bahrain", "Continent": "Asia", "Population": 1706669.0, "TotalCases": 42889, "NewCases": NaN, "TotalDeaths": 156.0, "NewDeaths": NaN, "TotalRecovered": 39945.0, "NewRecovered": NaN, "ActiveCases": 2788.0, "Serious,Critical": 41.0, "Tot Cases/1M pop": 25130.0, "Deaths/1M pop": 91.0, "TotalTests": 876700.0, "Tests/1M pop": 513691.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 4.89, "DeathRate": 0.36, "RecoveryRate": 93.14}, {"Country": "Japan", "Continent": "Asia", "Population": 126435859.0, "TotalCases": 42263, "NewCases": NaN, "TotalDeaths": 1026.0, "NewDeaths": NaN, "TotalRecovered": 28877.0, "NewRecovered": NaN, "ActiveCases": 12360.0, "Serious,Critical": 115.0, "Tot Cases/1M pop": 334.0, "Deaths/1M pop": 8.0, "TotalTests": 938739.0, "Tests/1M pop": 7425.0, "WHO Region": "WesternPacific", "TestPositivityRate": 4.5, "DeathRate": 2.43, "RecoveryRate": 68.33}, {"Country": "Armenia", "Continent": "Asia", "Population": 2963811.0, "TotalCases": 39819, "NewCases": NaN, "TotalDeaths": 772.0, "NewDeaths": NaN, "TotalRecovered": 31556.0, "NewRecovered": NaN, "ActiveCases": 7491.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 13435.0, "Deaths/1M pop": 260.0, "TotalTests": 171600.0, "Tests/1M pop": 57898.0, "WHO Region": "Europe", "TestPositivityRate": 23.2, "DeathRate": 1.94, "RecoveryRate": 79.25}, {"Country": "Ghana", "Continent": "Africa", "Population": 31133483.0, "TotalCases": 39642, "NewCases": NaN, "TotalDeaths": 199.0, "NewDeaths": NaN, "TotalRecovered": 36384.0, "NewRecovered": NaN, "ActiveCases": 3059.0, "Serious,Critical": 7.0, "Tot Cases/1M pop": 1273.0, "Deaths/1M pop": 6.0, "TotalTests": 405817.0, "Tests/1M pop": 13035.0, "WHO Region": "Africa", "TestPositivityRate": 9.77, "DeathRate": 0.5, "RecoveryRate": 91.78}, {"Country": "Kyrgyzstan", "Continent": "Asia", "Population": 6534479.0, "TotalCases": 38659, "NewCases": NaN, "TotalDeaths": 1447.0, "NewDeaths": NaN, "TotalRecovered": 30099.0, "NewRecovered": NaN, "ActiveCases": 7113.0, "Serious,Critical": 24.0, "Tot Cases/1M pop": 5916.0, "Deaths/1M pop": 221.0, "TotalTests": 267718.0, "Tests/1M pop": 40970.0, "WHO Region": "Europe", "TestPositivityRate": 14.44, "DeathRate": 3.74, "RecoveryRate": 77.86}, {"Country": "Afghanistan", "Continent": "Asia", "Population": 39009447.0, "TotalCases": 36896, "NewCases": NaN, "TotalDeaths": 1298.0, "NewDeaths": NaN, "TotalRecovered": 25840.0, "NewRecovered": NaN, "ActiveCases": 9758.0, "Serious,Critical": 31.0, "Tot Cases/1M pop": 946.0, "Deaths/1M pop": 33.0, "TotalTests": 90396.0, "Tests/1M pop": 2317.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 40.82, "DeathRate": 3.52, "RecoveryRate": 70.03}, {"Country": "Switzerland", "Continent": "Europe", "Population": 8660952.0, "TotalCases": 36108, "NewCases": NaN, "TotalDeaths": 1985.0, "NewDeaths": NaN, "TotalRecovered": 31600.0, "NewRecovered": NaN, "ActiveCases": 2523.0, "Serious,Critical": 23.0, "Tot Cases/1M pop": 4169.0, "Deaths/1M pop": 229.0, "TotalTests": 822764.0, "Tests/1M pop": 94997.0, "WHO Region": "Europe", "TestPositivityRate": 4.39, "DeathRate": 5.5, "RecoveryRate": 87.52}, {"Country": "Algeria", "Continent": "Africa", "Population": 43926079.0, "TotalCases": 33626, "NewCases": NaN, "TotalDeaths": 1273.0, "NewDeaths": NaN, "TotalRecovered": 23238.0, "NewRecovered": NaN, "ActiveCases": 9115.0, "Serious,Critical": 57.0, "Tot Cases/1M pop": 766.0, "Deaths/1M pop": 29.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Africa", "TestPositivityRate": 0.0, "DeathRate": 3.79, "RecoveryRate": 69.11}, {"Country": "Azerbaijan", "Continent": "Asia", "Population": 10148243.0, "TotalCases": 33247, "NewCases": NaN, "TotalDeaths": 479.0, "NewDeaths": NaN, "TotalRecovered": 29275.0, "NewRecovered": NaN, "ActiveCases": 3493.0, "Serious,Critical": 66.0, "Tot Cases/1M pop": 3276.0, "Deaths/1M pop": 47.0, "TotalTests": 766179.0, "Tests/1M pop": 75499.0, "WHO Region": "Europe", "TestPositivityRate": 4.34, "DeathRate": 1.44, "RecoveryRate": 88.05}, {"Country": "Morocco", "Continent": "Africa", "Population": 36953359.0, "TotalCases": 29644, "NewCases": NaN, "TotalDeaths": 449.0, "NewDeaths": NaN, "TotalRecovered": 20553.0, "NewRecovered": NaN, "ActiveCases": 8642.0, "Serious,Critical": 31.0, "Tot Cases/1M pop": 802.0, "Deaths/1M pop": 12.0, "TotalTests": 1383816.0, "Tests/1M pop": 37448.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 2.14, "DeathRate": 1.51, "RecoveryRate": 69.33}, {"Country": "Uzbekistan", "Continent": "Asia", "Population": 33516027.0, "TotalCases": 28315, "NewCases": NaN, "TotalDeaths": 175.0, "NewDeaths": NaN, "TotalRecovered": 19291.0, "NewRecovered": NaN, "ActiveCases": 8849.0, "Serious,Critical": 228.0, "Tot Cases/1M pop": 845.0, "Deaths/1M pop": 5.0, "TotalTests": 1377915.0, "Tests/1M pop": 41112.0, "WHO Region": "Europe", "TestPositivityRate": 2.05, "DeathRate": 0.62, "RecoveryRate": 68.13}, {"Country": "Serbia", "Continent": "Europe", "Population": 8733665.0, "TotalCases": 27332, "NewCases": NaN, "TotalDeaths": 621.0, "NewDeaths": NaN, "TotalRecovered": 14047.0, "NewRecovered": NaN, "ActiveCases": 12664.0, "Serious,Critical": 120.0, "Tot Cases/1M pop": 3129.0, "Deaths/1M pop": 71.0, "TotalTests": 723137.0, "Tests/1M pop": 82799.0, "WHO Region": "Europe", "TestPositivityRate": 3.78, "DeathRate": 2.27, "RecoveryRate": 51.39}, {"Country": "Moldova", "Continent": "Europe", "Population": 4032983.0, "TotalCases": 26628, "NewCases": NaN, "TotalDeaths": 828.0, "NewDeaths": NaN, "TotalRecovered": 18676.0, "NewRecovered": NaN, "ActiveCases": 7124.0, "Serious,Critical": 362.0, "Tot Cases/1M pop": 6603.0, "Deaths/1M pop": 205.0, "TotalTests": 128076.0, "Tests/1M pop": 31757.0, "WHO Region": "Europe", "TestPositivityRate": 20.79, "DeathRate": 3.11, "RecoveryRate": 70.14}, {"Country": "Ireland", "Continent": "Europe", "Population": 4943200.0, "TotalCases": 26372, "NewCases": NaN, "TotalDeaths": 1768.0, "NewDeaths": NaN, "TotalRecovered": 23364.0, "NewRecovered": NaN, "ActiveCases": 1240.0, "Serious,Critical": 5.0, "Tot Cases/1M pop": 5335.0, "Deaths/1M pop": 358.0, "TotalTests": 652917.0, "Tests/1M pop": 132084.0, "WHO Region": "Europe", "TestPositivityRate": 4.04, "DeathRate": 6.7, "RecoveryRate": 88.59}, {"Country": "Kenya", "Continent": "Africa", "Population": 53881160.0, "TotalCases": 24411, "NewCases": NaN, "TotalDeaths": 399.0, "NewDeaths": NaN, "TotalRecovered": 10444.0, "NewRecovered": NaN, "ActiveCases": 13568.0, "Serious,Critical": 44.0, "Tot Cases/1M pop": 453.0, "Deaths/1M pop": 7.0, "TotalTests": 335318.0, "Tests/1M pop": 6223.0, "WHO Region": "Africa", "TestPositivityRate": 7.28, "DeathRate": 1.63, "RecoveryRate": 42.78}, {"Country": "Venezuela", "Continent": "South America", "Population": 28427499.0, "TotalCases": 22299, "NewCases": NaN, "TotalDeaths": 195.0, "NewDeaths": NaN, "TotalRecovered": 12146.0, "NewRecovered": NaN, "ActiveCases": 9958.0, "Serious,Critical": 42.0, "Tot Cases/1M pop": 784.0, "Deaths/1M pop": 7.0, "TotalTests": 1567431.0, "Tests/1M pop": 55138.0, "WHO Region": "Americas", "TestPositivityRate": 1.42, "DeathRate": 0.87, "RecoveryRate": 54.47}, {"Country": "Nepal", "Continent": "Asia", "Population": 29186486.0, "TotalCases": 21750, "NewCases": NaN, "TotalDeaths": 65.0, "NewDeaths": NaN, "TotalRecovered": 15389.0, "NewRecovered": NaN, "ActiveCases": 6296.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 745.0, "Deaths/1M pop": 2.0, "TotalTests": 731977.0, "Tests/1M pop": 25079.0, "WHO Region": "South-EastAsia", "TestPositivityRate": 2.97, "DeathRate": 0.3, "RecoveryRate": 70.75}, {"Country": "Austria", "Continent": "Europe", "Population": 9011577.0, "TotalCases": 21696, "NewCases": NaN, "TotalDeaths": 719.0, "NewDeaths": NaN, "TotalRecovered": 19596.0, "NewRecovered": NaN, "ActiveCases": 1381.0, "Serious,Critical": 25.0, "Tot Cases/1M pop": 2408.0, "Deaths/1M pop": 80.0, "TotalTests": 937275.0, "Tests/1M pop": 104008.0, "WHO Region": "Europe", "TestPositivityRate": 2.31, "DeathRate": 3.31, "RecoveryRate": 90.32}, {"Country": "Costa Rica", "Continent": "North America", "Population": 5098730.0, "TotalCases": 21070, "NewCases": NaN, "TotalDeaths": 200.0, "NewDeaths": NaN, "TotalRecovered": 7038.0, "NewRecovered": NaN, "ActiveCases": 13832.0, "Serious,Critical": 103.0, "Tot Cases/1M pop": 4132.0, "Deaths/1M pop": 39.0, "TotalTests": 96110.0, "Tests/1M pop": 18850.0, "WHO Region": "Americas", "TestPositivityRate": 21.92, "DeathRate": 0.95, "RecoveryRate": 33.4}, {"Country": "Ethiopia", "Continent": "Africa", "Population": 115223736.0, "TotalCases": 20900, "NewCases": NaN, "TotalDeaths": 365.0, "NewDeaths": NaN, "TotalRecovered": 9027.0, "NewRecovered": NaN, "ActiveCases": 11508.0, "Serious,Critical": 185.0, "Tot Cases/1M pop": 181.0, "Deaths/1M pop": 3.0, "TotalTests": 468814.0, "Tests/1M pop": 4069.0, "WHO Region": "Africa", "TestPositivityRate": 4.46, "DeathRate": 1.75, "RecoveryRate": 43.19}, {"Country": "Australia", "Continent": "Australia/Oceania", "Population": 25528864.0, "TotalCases": 19890, "NewCases": NaN, "TotalDeaths": 255.0, "NewDeaths": NaN, "TotalRecovered": 10941.0, "NewRecovered": NaN, "ActiveCases": 8694.0, "Serious,Critical": 52.0, "Tot Cases/1M pop": 779.0, "Deaths/1M pop": 10.0, "TotalTests": 4631419.0, "Tests/1M pop": 181419.0, "WHO Region": "WesternPacific", "TestPositivityRate": 0.43, "DeathRate": 1.28, "RecoveryRate": 55.01}, {"Country": "El Salvador", "Continent": "North America", "Population": 6489514.0, "TotalCases": 19126, "NewCases": NaN, "TotalDeaths": 513.0, "NewDeaths": NaN, "TotalRecovered": 9236.0, "NewRecovered": NaN, "ActiveCases": 9377.0, "Serious,Critical": 509.0, "Tot Cases/1M pop": 2947.0, "Deaths/1M pop": 79.0, "TotalTests": 251271.0, "Tests/1M pop": 38720.0, "WHO Region": "Americas", "TestPositivityRate": 7.61, "DeathRate": 2.68, "RecoveryRate": 48.29}, {"Country": "Czechia", "Continent": "Europe", "Population": 10711019.0, "TotalCases": 17731, "NewCases": NaN, "TotalDeaths": 390.0, "NewDeaths": NaN, "TotalRecovered": 12320.0, "NewRecovered": NaN, "ActiveCases": 5021.0, "Serious,Critical": 17.0, "Tot Cases/1M pop": 1655.0, "Deaths/1M pop": 36.0, "TotalTests": 728670.0, "Tests/1M pop": 68030.0, "WHO Region": "Europe", "TestPositivityRate": 2.43, "DeathRate": 2.2, "RecoveryRate": 69.48}, {"Country": "Cameroon", "Continent": "Africa", "Population": 26606188.0, "TotalCases": 17718, "NewCases": NaN, "TotalDeaths": 391.0, "NewDeaths": NaN, "TotalRecovered": 15320.0, "NewRecovered": NaN, "ActiveCases": 2007.0, "Serious,Critical": 30.0, "Tot Cases/1M pop": 666.0, "Deaths/1M pop": 15.0, "TotalTests": 149000.0, "Tests/1M pop": 5600.0, "WHO Region": "Africa", "TestPositivityRate": 11.89, "DeathRate": 2.21, "RecoveryRate": 86.47}, {"Country": "Ivory Coast", "Continent": "Africa", "Population": 26437950.0, "TotalCases": 16447, "NewCases": NaN, "TotalDeaths": 103.0, "NewDeaths": NaN, "TotalRecovered": 12484.0, "NewRecovered": NaN, "ActiveCases": 3860.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 622.0, "Deaths/1M pop": 4.0, "TotalTests": 104584.0, "Tests/1M pop": 3956.0, "WHO Region": "Africa", "TestPositivityRate": 15.73, "DeathRate": 0.63, "RecoveryRate": 75.9}, {"Country": "South Korea", "Continent": "Asia", "Population": 51273732.0, "TotalCases": 14519, "NewCases": 20.0, "TotalDeaths": 303.0, "NewDeaths": 1.0, "TotalRecovered": 13543.0, "NewRecovered": 42.0, "ActiveCases": 673.0, "Serious,Critical": 18.0, "Tot Cases/1M pop": 283.0, "Deaths/1M pop": 6.0, "TotalTests": 1613652.0, "Tests/1M pop": 31471.0, "WHO Region": "WesternPacific", "TestPositivityRate": 0.9, "DeathRate": 2.09, "RecoveryRate": 93.28}, {"Country": "Denmark", "Continent": "Europe", "Population": 5794279.0, "TotalCases": 14306, "NewCases": NaN, "TotalDeaths": 617.0, "NewDeaths": NaN, "TotalRecovered": 12787.0, "NewRecovered": NaN, "ActiveCases": 902.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 2469.0, "Deaths/1M pop": 106.0, "TotalTests": 1654512.0, "Tests/1M pop": 285542.0, "WHO Region": "Europe", "TestPositivityRate": 0.86, "DeathRate": 4.31, "RecoveryRate": 89.38}, {"Country": "Palestine", "Continent": "Asia", "Population": 5112340.0, "TotalCases": 13398, "NewCases": NaN, "TotalDeaths": 92.0, "NewDeaths": NaN, "TotalRecovered": 6907.0, "NewRecovered": NaN, "ActiveCases": 6399.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 2621.0, "Deaths/1M pop": 18.0, "TotalTests": 200280.0, "Tests/1M pop": 39176.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 6.69, "DeathRate": 0.69, "RecoveryRate": 51.55}, {"Country": "Bosnia and Herzegovina", "Continent": "Europe", "Population": 3278650.0, "TotalCases": 13396, "NewCases": NaN, "TotalDeaths": 384.0, "NewDeaths": NaN, "TotalRecovered": 7042.0, "NewRecovered": NaN, "ActiveCases": 5970.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 4086.0, "Deaths/1M pop": 117.0, "TotalTests": 147021.0, "Tests/1M pop": 44842.0, "WHO Region": "Europe", "TestPositivityRate": 9.11, "DeathRate": 2.87, "RecoveryRate": 52.57}, {"Country": "Bulgaria", "Continent": "Europe", "Population": 6942854.0, "TotalCases": 13014, "NewCases": NaN, "TotalDeaths": 435.0, "NewDeaths": NaN, "TotalRecovered": 7374.0, "NewRecovered": NaN, "ActiveCases": 5205.0, "Serious,Critical": 47.0, "Tot Cases/1M pop": 1874.0, "Deaths/1M pop": 63.0, "TotalTests": 294087.0, "Tests/1M pop": 42358.0, "WHO Region": "Europe", "TestPositivityRate": 4.43, "DeathRate": 3.34, "RecoveryRate": 56.66}, {"Country": "Madagascar", "Continent": "Africa", "Population": 27755708.0, "TotalCases": 12526, "NewCases": NaN, "TotalDeaths": 134.0, "NewDeaths": NaN, "TotalRecovered": 10148.0, "NewRecovered": NaN, "ActiveCases": 2244.0, "Serious,Critical": 88.0, "Tot Cases/1M pop": 451.0, "Deaths/1M pop": 5.0, "TotalTests": 46301.0, "Tests/1M pop": 1668.0, "WHO Region": "Africa", "TestPositivityRate": 27.05, "DeathRate": 1.07, "RecoveryRate": 81.02}, {"Country": "Sudan", "Continent": "Africa", "Population": 43943536.0, "TotalCases": 11780, "NewCases": NaN, "TotalDeaths": 763.0, "NewDeaths": NaN, "TotalRecovered": 6194.0, "NewRecovered": NaN, "ActiveCases": 4823.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 268.0, "Deaths/1M pop": 17.0, "TotalTests": 401.0, "Tests/1M pop": 9.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 2937.66, "DeathRate": 6.48, "RecoveryRate": 52.58}, {"Country": "North Macedonia", "Continent": "Europe", "Population": 2083365.0, "TotalCases": 11399, "NewCases": NaN, "TotalDeaths": 517.0, "NewDeaths": NaN, "TotalRecovered": 7480.0, "NewRecovered": NaN, "ActiveCases": 3402.0, "Serious,Critical": 3.0, "Tot Cases/1M pop": 5471.0, "Deaths/1M pop": 248.0, "TotalTests": 109946.0, "Tests/1M pop": 52773.0, "WHO Region": "Europe", "TestPositivityRate": 10.37, "DeathRate": 4.54, "RecoveryRate": 65.62}, {"Country": "Senegal", "Continent": "Africa", "Population": 16783877.0, "TotalCases": 10715, "NewCases": NaN, "TotalDeaths": 223.0, "NewDeaths": NaN, "TotalRecovered": 7101.0, "NewRecovered": NaN, "ActiveCases": 3391.0, "Serious,Critical": 33.0, "Tot Cases/1M pop": 638.0, "Deaths/1M pop": 13.0, "TotalTests": 114761.0, "Tests/1M pop": 6838.0, "WHO Region": "Africa", "TestPositivityRate": 9.34, "DeathRate": 2.08, "RecoveryRate": 66.27}, {"Country": "Norway", "Continent": "Europe", "Population": 5425471.0, "TotalCases": 9468, "NewCases": NaN, "TotalDeaths": 256.0, "NewDeaths": NaN, "TotalRecovered": 8857.0, "NewRecovered": NaN, "ActiveCases": 355.0, "Serious,Critical": 3.0, "Tot Cases/1M pop": 1745.0, "Deaths/1M pop": 47.0, "TotalTests": 472841.0, "Tests/1M pop": 87152.0, "WHO Region": "Europe", "TestPositivityRate": 2.0, "DeathRate": 2.7, "RecoveryRate": 93.55}, {"Country": "Democratic Republic of the Congo", "Continent": "Africa", "Population": 89802183.0, "TotalCases": 9309, "NewCases": NaN, "TotalDeaths": 215.0, "NewDeaths": NaN, "TotalRecovered": 8048.0, "NewRecovered": NaN, "ActiveCases": 1046.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 104.0, "Deaths/1M pop": 2.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Africa", "TestPositivityRate": 0.0, "DeathRate": 2.31, "RecoveryRate": 86.45}, {"Country": "Malaysia", "Continent": "Asia", "Population": 32406372.0, "TotalCases": 9038, "NewCases": NaN, "TotalDeaths": 125.0, "NewDeaths": NaN, "TotalRecovered": 8713.0, "NewRecovered": NaN, "ActiveCases": 200.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 279.0, "Deaths/1M pop": 4.0, "TotalTests": 991333.0, "Tests/1M pop": 30591.0, "WHO Region": "WesternPacific", "TestPositivityRate": 0.91, "DeathRate": 1.38, "RecoveryRate": 96.4}, {"Country": "French Guiana", "Continent": "South America", "Population": 299385.0, "TotalCases": 8127, "NewCases": NaN, "TotalDeaths": 47.0, "NewDeaths": NaN, "TotalRecovered": 7240.0, "NewRecovered": NaN, "ActiveCases": 840.0, "Serious,Critical": 23.0, "Tot Cases/1M pop": 27146.0, "Deaths/1M pop": 157.0, "TotalTests": 41412.0, "Tests/1M pop": 138324.0, "WHO Region": NaN, "TestPositivityRate": 19.62, "DeathRate": 0.58, "RecoveryRate": 89.09}, {"Country": "Gabon", "Continent": "Africa", "Population": 2230563.0, "TotalCases": 7787, "NewCases": NaN, "TotalDeaths": 51.0, "NewDeaths": NaN, "TotalRecovered": 5609.0, "NewRecovered": NaN, "ActiveCases": 2127.0, "Serious,Critical": 11.0, "Tot Cases/1M pop": 3491.0, "Deaths/1M pop": 23.0, "TotalTests": 85369.0, "Tests/1M pop": 38272.0, "WHO Region": "Africa", "TestPositivityRate": 9.12, "DeathRate": 0.65, "RecoveryRate": 72.03}, {"Country": "Tajikistan", "Continent": "Asia", "Population": 9557468.0, "TotalCases": 7665, "NewCases": NaN, "TotalDeaths": 62.0, "NewDeaths": NaN, "TotalRecovered": 6443.0, "NewRecovered": NaN, "ActiveCases": 1160.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 802.0, "Deaths/1M pop": 6.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Europe", "TestPositivityRate": 0.0, "DeathRate": 0.81, "RecoveryRate": 84.06}, {"Country": "Guinea", "Continent": "Africa", "Population": 13164905.0, "TotalCases": 7664, "NewCases": NaN, "TotalDeaths": 49.0, "NewDeaths": NaN, "TotalRecovered": 6757.0, "NewRecovered": NaN, "ActiveCases": 858.0, "Serious,Critical": 24.0, "Tot Cases/1M pop": 582.0, "Deaths/1M pop": 4.0, "TotalTests": 14407.0, "Tests/1M pop": 1094.0, "WHO Region": "Africa", "TestPositivityRate": 53.2, "DeathRate": 0.64, "RecoveryRate": 88.17}, {"Country": "Haiti", "Continent": "North America", "Population": 11416103.0, "TotalCases": 7544, "NewCases": NaN, "TotalDeaths": 171.0, "NewDeaths": NaN, "TotalRecovered": 4832.0, "NewRecovered": NaN, "ActiveCases": 2541.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 661.0, "Deaths/1M pop": 15.0, "TotalTests": 18443.0, "Tests/1M pop": 1616.0, "WHO Region": "Americas", "TestPositivityRate": 40.9, "DeathRate": 2.27, "RecoveryRate": 64.05}, {"Country": "Finland", "Continent": "Europe", "Population": 5541604.0, "TotalCases": 7532, "NewCases": NaN, "TotalDeaths": 331.0, "NewDeaths": NaN, "TotalRecovered": 6980.0, "NewRecovered": NaN, "ActiveCases": 221.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 1359.0, "Deaths/1M pop": 60.0, "TotalTests": 389500.0, "Tests/1M pop": 70287.0, "WHO Region": "Europe", "TestPositivityRate": 1.93, "DeathRate": 4.39, "RecoveryRate": 92.67}, {"Country": "Zambia", "Continent": "Africa", "Population": 18430129.0, "TotalCases": 7164, "NewCases": NaN, "TotalDeaths": 199.0, "NewDeaths": NaN, "TotalRecovered": 5786.0, "NewRecovered": NaN, "ActiveCases": 1179.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 389.0, "Deaths/1M pop": 11.0, "TotalTests": 90307.0, "Tests/1M pop": 4900.0, "WHO Region": "Africa", "TestPositivityRate": 7.93, "DeathRate": 2.78, "RecoveryRate": 80.76}, {"Country": "Luxembourg", "Continent": "Europe", "Population": 626952.0, "TotalCases": 7073, "NewCases": NaN, "TotalDeaths": 119.0, "NewDeaths": NaN, "TotalRecovered": 5750.0, "NewRecovered": NaN, "ActiveCases": 1204.0, "Serious,Critical": 9.0, "Tot Cases/1M pop": 11282.0, "Deaths/1M pop": 190.0, "TotalTests": 623994.0, "Tests/1M pop": 995282.0, "WHO Region": "Europe", "TestPositivityRate": 1.13, "DeathRate": 1.68, "RecoveryRate": 81.3}, {"Country": "Mauritania", "Continent": "Africa", "Population": 4660728.0, "TotalCases": 6444, "NewCases": NaN, "TotalDeaths": 157.0, "NewDeaths": NaN, "TotalRecovered": 5291.0, "NewRecovered": NaN, "ActiveCases": 996.0, "Serious,Critical": 3.0, "Tot Cases/1M pop": 1383.0, "Deaths/1M pop": 34.0, "TotalTests": 57387.0, "Tests/1M pop": 12313.0, "WHO Region": "Africa", "TestPositivityRate": 11.23, "DeathRate": 2.44, "RecoveryRate": 82.11}, {"Country": "Paraguay", "Continent": "South America", "Population": 7141091.0, "TotalCases": 6375, "NewCases": NaN, "TotalDeaths": 66.0, "NewDeaths": NaN, "TotalRecovered": 4974.0, "NewRecovered": NaN, "ActiveCases": 1335.0, "Serious,Critical": 23.0, "Tot Cases/1M pop": 893.0, "Deaths/1M pop": 9.0, "TotalTests": 135277.0, "Tests/1M pop": 18943.0, "WHO Region": "Americas", "TestPositivityRate": 4.71, "DeathRate": 1.04, "RecoveryRate": 78.02}, {"Country": "Albania", "Continent": "Europe", "Population": 2877470.0, "TotalCases": 6016, "NewCases": NaN, "TotalDeaths": 188.0, "NewDeaths": NaN, "TotalRecovered": 3155.0, "NewRecovered": NaN, "ActiveCases": 2673.0, "Serious,Critical": 23.0, "Tot Cases/1M pop": 2091.0, "Deaths/1M pop": 65.0, "TotalTests": 38997.0, "Tests/1M pop": 13553.0, "WHO Region": "Europe", "TestPositivityRate": 15.43, "DeathRate": 3.12, "RecoveryRate": 52.44}, {"Country": "Lebanon", "Continent": "Asia", "Population": 6822220.0, "TotalCases": 5672, "NewCases": NaN, "TotalDeaths": 70.0, "NewDeaths": NaN, "TotalRecovered": 1974.0, "NewRecovered": NaN, "ActiveCases": 3628.0, "Serious,Critical": 46.0, "Tot Cases/1M pop": 831.0, "Deaths/1M pop": 10.0, "TotalTests": 345268.0, "Tests/1M pop": 50609.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 1.64, "DeathRate": 1.23, "RecoveryRate": 34.8}, {"Country": "Croatia", "Continent": "Europe", "Population": 4102577.0, "TotalCases": 5404, "NewCases": NaN, "TotalDeaths": 155.0, "NewDeaths": NaN, "TotalRecovered": 4688.0, "NewRecovered": NaN, "ActiveCases": 561.0, "Serious,Critical": 7.0, "Tot Cases/1M pop": 1317.0, "Deaths/1M pop": 38.0, "TotalTests": 125317.0, "Tests/1M pop": 30546.0, "WHO Region": "Europe", "TestPositivityRate": 4.31, "DeathRate": 2.87, "RecoveryRate": 86.75}, {"Country": "Djibouti", "Continent": "Africa", "Population": 989387.0, "TotalCases": 5330, "NewCases": NaN, "TotalDeaths": 59.0, "NewDeaths": NaN, "TotalRecovered": 5057.0, "NewRecovered": NaN, "ActiveCases": 214.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 5387.0, "Deaths/1M pop": 60.0, "TotalTests": 59909.0, "Tests/1M pop": 60552.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 8.9, "DeathRate": 1.11, "RecoveryRate": 94.88}, {"Country": "Greece", "Continent": "Europe", "Population": 10417673.0, "TotalCases": 5123, "NewCases": NaN, "TotalDeaths": 210.0, "NewDeaths": NaN, "TotalRecovered": 1374.0, "NewRecovered": NaN, "ActiveCases": 3539.0, "Serious,Critical": 14.0, "Tot Cases/1M pop": 492.0, "Deaths/1M pop": 20.0, "TotalTests": 619393.0, "Tests/1M pop": 59456.0, "WHO Region": "Europe", "TestPositivityRate": 0.83, "DeathRate": 4.1, "RecoveryRate": 26.82}, {"Country": "Libya", "Continent": "Africa", "Population": 6880353.0, "TotalCases": 4879, "NewCases": NaN, "TotalDeaths": 107.0, "NewDeaths": NaN, "TotalRecovered": 652.0, "NewRecovered": NaN, "ActiveCases": 4120.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 709.0, "Deaths/1M pop": 16.0, "TotalTests": 59699.0, "Tests/1M pop": 8677.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 8.17, "DeathRate": 2.19, "RecoveryRate": 13.36}, {"Country": "Equatorial Guinea", "Continent": "Africa", "Population": 1407001.0, "TotalCases": 4821, "NewCases": NaN, "TotalDeaths": 83.0, "NewDeaths": NaN, "TotalRecovered": 2182.0, "NewRecovered": NaN, "ActiveCases": 2556.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 3426.0, "Deaths/1M pop": 59.0, "TotalTests": 44356.0, "Tests/1M pop": 31525.0, "WHO Region": "Africa", "TestPositivityRate": 10.87, "DeathRate": 1.72, "RecoveryRate": 45.26}, {"Country": "Maldives", "Continent": "Asia", "Population": 541448.0, "TotalCases": 4680, "NewCases": NaN, "TotalDeaths": 19.0, "NewDeaths": NaN, "TotalRecovered": 2725.0, "NewRecovered": NaN, "ActiveCases": 1936.0, "Serious,Critical": 12.0, "Tot Cases/1M pop": 8643.0, "Deaths/1M pop": 35.0, "TotalTests": 85587.0, "Tests/1M pop": 158071.0, "WHO Region": "South-EastAsia", "TestPositivityRate": 5.47, "DeathRate": 0.41, "RecoveryRate": 58.23}, {"Country": "Central African Republic", "Continent": "Africa", "Population": 4837752.0, "TotalCases": 4620, "NewCases": NaN, "TotalDeaths": 59.0, "NewDeaths": NaN, "TotalRecovered": 1641.0, "NewRecovered": NaN, "ActiveCases": 2920.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 955.0, "Deaths/1M pop": 12.0, "TotalTests": 29589.0, "Tests/1M pop": 6116.0, "WHO Region": NaN, "TestPositivityRate": 15.61, "DeathRate": 1.28, "RecoveryRate": 35.52}, {"Country": "Hungary", "Continent": "Europe", "Population": 9657785.0, "TotalCases": 4597, "NewCases": NaN, "TotalDeaths": 600.0, "NewDeaths": NaN, "TotalRecovered": 3463.0, "NewRecovered": NaN, "ActiveCases": 534.0, "Serious,Critical": 8.0, "Tot Cases/1M pop": 476.0, "Deaths/1M pop": 62.0, "TotalTests": 352546.0, "Tests/1M pop": 36504.0, "WHO Region": "Europe", "TestPositivityRate": 1.3, "DeathRate": 13.05, "RecoveryRate": 75.33}, {"Country": "Malawi", "Continent": "Africa", "Population": 19174839.0, "TotalCases": 4491, "NewCases": NaN, "TotalDeaths": 137.0, "NewDeaths": NaN, "TotalRecovered": 2137.0, "NewRecovered": NaN, "ActiveCases": 2217.0, "Serious,Critical": 4.0, "Tot Cases/1M pop": 234.0, "Deaths/1M pop": 7.0, "TotalTests": 33466.0, "Tests/1M pop": 1745.0, "WHO Region": "Africa", "TestPositivityRate": 13.42, "DeathRate": 3.05, "RecoveryRate": 47.58}, {"Country": "Zimbabwe", "Continent": "Africa", "Population": 14883803.0, "TotalCases": 4339, "NewCases": NaN, "TotalDeaths": 84.0, "NewDeaths": NaN, "TotalRecovered": 1264.0, "NewRecovered": NaN, "ActiveCases": 2991.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 292.0, "Deaths/1M pop": 6.0, "TotalTests": 140421.0, "Tests/1M pop": 9434.0, "WHO Region": "Africa", "TestPositivityRate": 3.09, "DeathRate": 1.94, "RecoveryRate": 29.13}, {"Country": "Nicaragua", "Continent": "North America", "Population": 6632263.0, "TotalCases": 3902, "NewCases": NaN, "TotalDeaths": 123.0, "NewDeaths": NaN, "TotalRecovered": 2913.0, "NewRecovered": NaN, "ActiveCases": 866.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 588.0, "Deaths/1M pop": 19.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Americas", "TestPositivityRate": 0.0, "DeathRate": 3.15, "RecoveryRate": 74.65}, {"Country": "Hong Kong", "Continent": "Asia", "Population": 7503041.0, "TotalCases": 3850, "NewCases": NaN, "TotalDeaths": 46.0, "NewDeaths": NaN, "TotalRecovered": 2458.0, "NewRecovered": NaN, "ActiveCases": 1346.0, "Serious,Critical": 39.0, "Tot Cases/1M pop": 513.0, "Deaths/1M pop": 6.0, "TotalTests": 692430.0, "Tests/1M pop": 92287.0, "WHO Region": "WesternPacific", "TestPositivityRate": 0.56, "DeathRate": 1.19, "RecoveryRate": 63.84}, {"Country": "Republic of the Congo", "Continent": "Africa", "Population": 5530506.0, "TotalCases": 3546, "NewCases": NaN, "TotalDeaths": 58.0, "NewDeaths": NaN, "TotalRecovered": 1589.0, "NewRecovered": NaN, "ActiveCases": 1899.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 641.0, "Deaths/1M pop": 10.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Africa", "TestPositivityRate": 0.0, "DeathRate": 1.64, "RecoveryRate": 44.81}, {"Country": "Montenegro", "Continent": "Europe", "Population": 628074.0, "TotalCases": 3480, "NewCases": NaN, "TotalDeaths": 60.0, "NewDeaths": NaN, "TotalRecovered": 2178.0, "NewRecovered": NaN, "ActiveCases": 1242.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 5541.0, "Deaths/1M pop": 96.0, "TotalTests": 38427.0, "Tests/1M pop": 61182.0, "WHO Region": "Europe", "TestPositivityRate": 9.06, "DeathRate": 1.72, "RecoveryRate": 62.59}, {"Country": "Thailand", "Continent": "Asia", "Population": 69817894.0, "TotalCases": 3330, "NewCases": NaN, "TotalDeaths": 58.0, "NewDeaths": NaN, "TotalRecovered": 3148.0, "NewRecovered": NaN, "ActiveCases": 124.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 48.0, "Deaths/1M pop": 0.8, "TotalTests": 749213.0, "Tests/1M pop": 10731.0, "WHO Region": "South-EastAsia", "TestPositivityRate": 0.44, "DeathRate": 1.74, "RecoveryRate": 94.53}, {"Country": "Somalia", "Continent": "Africa", "Population": 15933012.0, "TotalCases": 3227, "NewCases": NaN, "TotalDeaths": 93.0, "NewDeaths": NaN, "TotalRecovered": 1728.0, "NewRecovered": NaN, "ActiveCases": 1406.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 203.0, "Deaths/1M pop": 6.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 0.0, "DeathRate": 2.88, "RecoveryRate": 53.55}, {"Country": "Mayotte", "Continent": "Africa", "Population": 273419.0, "TotalCases": 3042, "NewCases": NaN, "TotalDeaths": 39.0, "NewDeaths": NaN, "TotalRecovered": 2738.0, "NewRecovered": NaN, "ActiveCases": 265.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 11126.0, "Deaths/1M pop": 143.0, "TotalTests": 13000.0, "Tests/1M pop": 47546.0, "WHO Region": NaN, "TestPositivityRate": 23.4, "DeathRate": 1.28, "RecoveryRate": 90.01}, {"Country": "Eswatini", "Continent": "Africa", "Population": 1161348.0, "TotalCases": 2968, "NewCases": NaN, "TotalDeaths": 55.0, "NewDeaths": NaN, "TotalRecovered": 1476.0, "NewRecovered": NaN, "ActiveCases": 1437.0, "Serious,Critical": 5.0, "Tot Cases/1M pop": 2556.0, "Deaths/1M pop": 47.0, "TotalTests": 20784.0, "Tests/1M pop": 17896.0, "WHO Region": "Africa", "TestPositivityRate": 14.28, "DeathRate": 1.85, "RecoveryRate": 49.73}, {"Country": "Sri Lanka", "Continent": "Asia", "Population": 21422362.0, "TotalCases": 2839, "NewCases": NaN, "TotalDeaths": 11.0, "NewDeaths": NaN, "TotalRecovered": 2541.0, "NewRecovered": NaN, "ActiveCases": 287.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 133.0, "Deaths/1M pop": 0.5, "TotalTests": 166737.0, "Tests/1M pop": 7783.0, "WHO Region": "South-EastAsia", "TestPositivityRate": 1.7, "DeathRate": 0.39, "RecoveryRate": 89.5}, {"Country": "Cuba", "Continent": "North America", "Population": 11325899.0, "TotalCases": 2775, "NewCases": NaN, "TotalDeaths": 88.0, "NewDeaths": NaN, "TotalRecovered": 2409.0, "NewRecovered": NaN, "ActiveCases": 278.0, "Serious,Critical": 4.0, "Tot Cases/1M pop": 245.0, "Deaths/1M pop": 8.0, "TotalTests": 285471.0, "Tests/1M pop": 25205.0, "WHO Region": "Americas", "TestPositivityRate": 0.97, "DeathRate": 3.17, "RecoveryRate": 86.81}, {"Country": "Cabo Verde", "Continent": "Africa", "Population": 556581.0, "TotalCases": 2734, "NewCases": NaN, "TotalDeaths": 27.0, "NewDeaths": NaN, "TotalRecovered": 2010.0, "NewRecovered": NaN, "ActiveCases": 697.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 4912.0, "Deaths/1M pop": 49.0, "TotalTests": 61633.0, "Tests/1M pop": 110735.0, "WHO Region": "Africa", "TestPositivityRate": 4.44, "DeathRate": 0.99, "RecoveryRate": 73.52}, {"Country": "Namibia", "Continent": "Africa", "Population": 2545264.0, "TotalCases": 2652, "NewCases": NaN, "TotalDeaths": 15.0, "NewDeaths": NaN, "TotalRecovered": 563.0, "NewRecovered": NaN, "ActiveCases": 2074.0, "Serious,Critical": 24.0, "Tot Cases/1M pop": 1042.0, "Deaths/1M pop": 6.0, "TotalTests": 29233.0, "Tests/1M pop": 11485.0, "WHO Region": "Africa", "TestPositivityRate": 9.07, "DeathRate": 0.57, "RecoveryRate": 21.23}, {"Country": "Mali", "Continent": "Africa", "Population": 20302901.0, "TotalCases": 2552, "NewCases": NaN, "TotalDeaths": 124.0, "NewDeaths": NaN, "TotalRecovered": 1954.0, "NewRecovered": NaN, "ActiveCases": 474.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 126.0, "Deaths/1M pop": 6.0, "TotalTests": 25152.0, "Tests/1M pop": 1239.0, "WHO Region": "Africa", "TestPositivityRate": 10.15, "DeathRate": 4.86, "RecoveryRate": 76.57}, {"Country": "Slovakia", "Continent": "Europe", "Population": 5459915.0, "TotalCases": 2480, "NewCases": NaN, "TotalDeaths": 29.0, "NewDeaths": NaN, "TotalRecovered": 1824.0, "NewRecovered": NaN, "ActiveCases": 627.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 454.0, "Deaths/1M pop": 5.0, "TotalTests": 272322.0, "Tests/1M pop": 49877.0, "WHO Region": "Europe", "TestPositivityRate": 0.91, "DeathRate": 1.17, "RecoveryRate": 73.55}, {"Country": "South Sudan", "Continent": "Africa", "Population": 11206572.0, "TotalCases": 2450, "NewCases": NaN, "TotalDeaths": 47.0, "NewDeaths": NaN, "TotalRecovered": 1175.0, "NewRecovered": NaN, "ActiveCases": 1228.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 219.0, "Deaths/1M pop": 4.0, "TotalTests": 12044.0, "Tests/1M pop": 1075.0, "WHO Region": "Africa", "TestPositivityRate": 20.34, "DeathRate": 1.92, "RecoveryRate": 47.96}, {"Country": "Slovenia", "Continent": "Europe", "Population": 2078968.0, "TotalCases": 2223, "NewCases": NaN, "TotalDeaths": 125.0, "NewDeaths": NaN, "TotalRecovered": 1909.0, "NewRecovered": NaN, "ActiveCases": 189.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 1069.0, "Deaths/1M pop": 60.0, "TotalTests": 135702.0, "Tests/1M pop": 65274.0, "WHO Region": "Europe", "TestPositivityRate": 1.64, "DeathRate": 5.62, "RecoveryRate": 85.87}, {"Country": "Lithuania", "Continent": "Europe", "Population": 2718121.0, "TotalCases": 2171, "NewCases": NaN, "TotalDeaths": 81.0, "NewDeaths": NaN, "TotalRecovered": 1656.0, "NewRecovered": NaN, "ActiveCases": 434.0, "Serious,Critical": 6.0, "Tot Cases/1M pop": 799.0, "Deaths/1M pop": 30.0, "TotalTests": 540784.0, "Tests/1M pop": 198955.0, "WHO Region": "Europe", "TestPositivityRate": 0.4, "DeathRate": 3.73, "RecoveryRate": 76.28}, {"Country": "Estonia", "Continent": "Europe", "Population": 1326627.0, "TotalCases": 2124, "NewCases": NaN, "TotalDeaths": 63.0, "NewDeaths": NaN, "TotalRecovered": 1954.0, "NewRecovered": NaN, "ActiveCases": 107.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 1601.0, "Deaths/1M pop": 47.0, "TotalTests": 122880.0, "Tests/1M pop": 92626.0, "WHO Region": "Europe", "TestPositivityRate": 1.73, "DeathRate": 2.97, "RecoveryRate": 92.0}, {"Country": "Mozambique", "Continent": "Africa", "Population": 31333962.0, "TotalCases": 2120, "NewCases": NaN, "TotalDeaths": 15.0, "NewDeaths": NaN, "TotalRecovered": 795.0, "NewRecovered": NaN, "ActiveCases": 1310.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 68.0, "Deaths/1M pop": 0.5, "TotalTests": 65151.0, "Tests/1M pop": 2079.0, "WHO Region": "Africa", "TestPositivityRate": 3.25, "DeathRate": 0.71, "RecoveryRate": 37.5}, {"Country": "Rwanda", "Continent": "Africa", "Population": 12981546.0, "TotalCases": 2111, "NewCases": NaN, "TotalDeaths": 5.0, "NewDeaths": NaN, "TotalRecovered": 1258.0, "NewRecovered": NaN, "ActiveCases": 848.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 163.0, "Deaths/1M pop": 0.4, "TotalTests": 286251.0, "Tests/1M pop": 22051.0, "WHO Region": "Africa", "TestPositivityRate": 0.74, "DeathRate": 0.24, "RecoveryRate": 59.59}, {"Country": "Suriname", "Continent": "South America", "Population": 587154.0, "TotalCases": 2096, "NewCases": NaN, "TotalDeaths": 29.0, "NewDeaths": NaN, "TotalRecovered": 1446.0, "NewRecovered": NaN, "ActiveCases": 621.0, "Serious,Critical": 9.0, "Tot Cases/1M pop": 3570.0, "Deaths/1M pop": 49.0, "TotalTests": 2785.0, "Tests/1M pop": 4743.0, "WHO Region": "Americas", "TestPositivityRate": 75.26, "DeathRate": 1.38, "RecoveryRate": 68.99}, {"Country": "Guinea-Bissau", "Continent": "Africa", "Population": 1972277.0, "TotalCases": 2032, "NewCases": NaN, "TotalDeaths": 27.0, "NewDeaths": NaN, "TotalRecovered": 944.0, "NewRecovered": NaN, "ActiveCases": 1061.0, "Serious,Critical": 5.0, "Tot Cases/1M pop": 1030.0, "Deaths/1M pop": 14.0, "TotalTests": 1500.0, "Tests/1M pop": 761.0, "WHO Region": "Africa", "TestPositivityRate": 135.47, "DeathRate": 1.33, "RecoveryRate": 46.46}, {"Country": "Benin", "Continent": "Africa", "Population": 12151976.0, "TotalCases": 1936, "NewCases": NaN, "TotalDeaths": 38.0, "NewDeaths": NaN, "TotalRecovered": 1600.0, "NewRecovered": NaN, "ActiveCases": 298.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 159.0, "Deaths/1M pop": 3.0, "TotalTests": 93677.0, "Tests/1M pop": 7709.0, "WHO Region": "Africa", "TestPositivityRate": 2.07, "DeathRate": 1.96, "RecoveryRate": 82.64}, {"Country": "Iceland", "Continent": "Europe", "Population": 341465.0, "TotalCases": 1930, "NewCases": NaN, "TotalDeaths": 10.0, "NewDeaths": NaN, "TotalRecovered": 1825.0, "NewRecovered": NaN, "ActiveCases": 95.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 5652.0, "Deaths/1M pop": 29.0, "TotalTests": 149693.0, "Tests/1M pop": 438385.0, "WHO Region": "Europe", "TestPositivityRate": 1.29, "DeathRate": 0.52, "RecoveryRate": 94.56}, {"Country": "Sierra Leone", "Continent": "Africa", "Population": 7992169.0, "TotalCases": 1877, "NewCases": NaN, "TotalDeaths": 67.0, "NewDeaths": NaN, "TotalRecovered": 1427.0, "NewRecovered": NaN, "ActiveCases": 383.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 235.0, "Deaths/1M pop": 8.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Africa", "TestPositivityRate": 0.0, "DeathRate": 3.57, "RecoveryRate": 76.03}, {"Country": "Yemen", "Continent": "Asia", "Population": 29886897.0, "TotalCases": 1768, "NewCases": NaN, "TotalDeaths": 508.0, "NewDeaths": NaN, "TotalRecovered": 898.0, "NewRecovered": NaN, "ActiveCases": 362.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 59.0, "Deaths/1M pop": 17.0, "TotalTests": 120.0, "Tests/1M pop": 4.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 1473.33, "DeathRate": 28.73, "RecoveryRate": 50.79}, {"Country": "Tunisia", "Continent": "Africa", "Population": 11830801.0, "TotalCases": 1642, "NewCases": NaN, "TotalDeaths": 51.0, "NewDeaths": NaN, "TotalRecovered": 1241.0, "NewRecovered": NaN, "ActiveCases": 350.0, "Serious,Critical": 9.0, "Tot Cases/1M pop": 139.0, "Deaths/1M pop": 4.0, "TotalTests": 100298.0, "Tests/1M pop": 8478.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 1.64, "DeathRate": 3.11, "RecoveryRate": 75.58}, {"Country": "New Zealand", "Continent": "Australia/Oceania", "Population": 5002100.0, "TotalCases": 1569, "NewCases": NaN, "TotalDeaths": 22.0, "NewDeaths": NaN, "TotalRecovered": 1524.0, "NewRecovered": NaN, "ActiveCases": 23.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 314.0, "Deaths/1M pop": 4.0, "TotalTests": 486943.0, "Tests/1M pop": 97348.0, "WHO Region": "WesternPacific", "TestPositivityRate": 0.32, "DeathRate": 1.4, "RecoveryRate": 97.13}, {"Country": "Angola", "Continent": "Africa", "Population": 32956300.0, "TotalCases": 1483, "NewCases": NaN, "TotalDeaths": 64.0, "NewDeaths": NaN, "TotalRecovered": 520.0, "NewRecovered": NaN, "ActiveCases": 899.0, "Serious,Critical": 20.0, "Tot Cases/1M pop": 45.0, "Deaths/1M pop": 2.0, "TotalTests": 64747.0, "Tests/1M pop": 1965.0, "WHO Region": "Africa", "TestPositivityRate": 2.29, "DeathRate": 4.32, "RecoveryRate": 35.06}, {"Country": "Uruguay", "Continent": "South America", "Population": 3474956.0, "TotalCases": 1318, "NewCases": NaN, "TotalDeaths": 37.0, "NewDeaths": NaN, "TotalRecovered": 1079.0, "NewRecovered": NaN, "ActiveCases": 202.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 379.0, "Deaths/1M pop": 11.0, "TotalTests": 126956.0, "Tests/1M pop": 36535.0, "WHO Region": "Americas", "TestPositivityRate": 1.04, "DeathRate": 2.81, "RecoveryRate": 81.87}, {"Country": "Latvia", "Continent": "Europe", "Population": 1883936.0, "TotalCases": 1275, "NewCases": NaN, "TotalDeaths": 32.0, "NewDeaths": NaN, "TotalRecovered": 1070.0, "NewRecovered": NaN, "ActiveCases": 173.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 677.0, "Deaths/1M pop": 17.0, "TotalTests": 207909.0, "Tests/1M pop": 110359.0, "WHO Region": "Europe", "TestPositivityRate": 0.61, "DeathRate": 2.51, "RecoveryRate": 83.92}, {"Country": "Jordan", "Continent": "Asia", "Population": 10213138.0, "TotalCases": 1232, "NewCases": NaN, "TotalDeaths": 11.0, "NewDeaths": NaN, "TotalRecovered": 1171.0, "NewRecovered": NaN, "ActiveCases": 50.0, "Serious,Critical": 3.0, "Tot Cases/1M pop": 121.0, "Deaths/1M pop": 1.0, "TotalTests": 628745.0, "Tests/1M pop": 61562.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 0.2, "DeathRate": 0.89, "RecoveryRate": 95.05}, {"Country": "Liberia", "Continent": "Africa", "Population": 5068618.0, "TotalCases": 1224, "NewCases": NaN, "TotalDeaths": 78.0, "NewDeaths": NaN, "TotalRecovered": 705.0, "NewRecovered": NaN, "ActiveCases": 441.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 241.0, "Deaths/1M pop": 15.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Africa", "TestPositivityRate": 0.0, "DeathRate": 6.37, "RecoveryRate": 57.6}, {"Country": "Uganda", "Continent": "Africa", "Population": 45867852.0, "TotalCases": 1223, "NewCases": NaN, "TotalDeaths": 5.0, "NewDeaths": NaN, "TotalRecovered": 1102.0, "NewRecovered": NaN, "ActiveCases": 116.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 27.0, "Deaths/1M pop": 0.1, "TotalTests": 288367.0, "Tests/1M pop": 6287.0, "WHO Region": "Africa", "TestPositivityRate": 0.42, "DeathRate": 0.41, "RecoveryRate": 90.11}, {"Country": "Cyprus", "Continent": "Asia", "Population": 1208238.0, "TotalCases": 1208, "NewCases": NaN, "TotalDeaths": 19.0, "NewDeaths": NaN, "TotalRecovered": 856.0, "NewRecovered": NaN, "ActiveCases": 333.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 1000.0, "Deaths/1M pop": 16.0, "TotalTests": 216597.0, "Tests/1M pop": 179267.0, "WHO Region": "Europe", "TestPositivityRate": 0.56, "DeathRate": 1.57, "RecoveryRate": 70.86}, {"Country": "Georgia", "Continent": "Asia", "Population": 3988368.0, "TotalCases": 1206, "NewCases": NaN, "TotalDeaths": 17.0, "NewDeaths": NaN, "TotalRecovered": 987.0, "NewRecovered": NaN, "ActiveCases": 202.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 302.0, "Deaths/1M pop": 4.0, "TotalTests": 240473.0, "Tests/1M pop": 60294.0, "WHO Region": "Europe", "TestPositivityRate": 0.5, "DeathRate": 1.41, "RecoveryRate": 81.84}, {"Country": "Burkina Faso", "Continent": "Africa", "Population": 20954852.0, "TotalCases": 1158, "NewCases": NaN, "TotalDeaths": 54.0, "NewDeaths": NaN, "TotalRecovered": 961.0, "NewRecovered": NaN, "ActiveCases": 143.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 55.0, "Deaths/1M pop": 3.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Africa", "TestPositivityRate": 0.0, "DeathRate": 4.66, "RecoveryRate": 82.99}, {"Country": "Niger", "Continent": "Africa", "Population": 24281433.0, "TotalCases": 1153, "NewCases": NaN, "TotalDeaths": 69.0, "NewDeaths": NaN, "TotalRecovered": 1057.0, "NewRecovered": NaN, "ActiveCases": 27.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 47.0, "Deaths/1M pop": 3.0, "TotalTests": 9052.0, "Tests/1M pop": 373.0, "WHO Region": "Africa", "TestPositivityRate": 12.74, "DeathRate": 5.98, "RecoveryRate": 91.67}, {"Country": "Togo", "Continent": "Africa", "Population": 8296582.0, "TotalCases": 1012, "NewCases": NaN, "TotalDeaths": 22.0, "NewDeaths": NaN, "TotalRecovered": 697.0, "NewRecovered": NaN, "ActiveCases": 293.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 122.0, "Deaths/1M pop": 3.0, "TotalTests": 45767.0, "Tests/1M pop": 5516.0, "WHO Region": "Africa", "TestPositivityRate": 2.21, "DeathRate": 2.17, "RecoveryRate": 68.87}, {"Country": "Syria", "Continent": "Asia", "Population": 17539600.0, "TotalCases": 999, "NewCases": NaN, "TotalDeaths": 48.0, "NewDeaths": NaN, "TotalRecovered": 311.0, "NewRecovered": NaN, "ActiveCases": 640.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 57.0, "Deaths/1M pop": 3.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "EasternMediterranean", "TestPositivityRate": 0.0, "DeathRate": 4.8, "RecoveryRate": 31.13}, {"Country": "Jamaica", "Continent": "North America", "Population": 2962478.0, "TotalCases": 958, "NewCases": 30.0, "TotalDeaths": 12.0, "NewDeaths": NaN, "TotalRecovered": 745.0, "NewRecovered": NaN, "ActiveCases": 201.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 323.0, "Deaths/1M pop": 4.0, "TotalTests": 41840.0, "Tests/1M pop": 14123.0, "WHO Region": "Americas", "TestPositivityRate": 2.29, "DeathRate": 1.25, "RecoveryRate": 77.77}, {"Country": "Malta", "Continent": "Europe", "Population": 441663.0, "TotalCases": 946, "NewCases": NaN, "TotalDeaths": 9.0, "NewDeaths": NaN, "TotalRecovered": 670.0, "NewRecovered": NaN, "ActiveCases": 267.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 2142.0, "Deaths/1M pop": 20.0, "TotalTests": 136713.0, "Tests/1M pop": 309541.0, "WHO Region": "Europe", "TestPositivityRate": 0.69, "DeathRate": 0.95, "RecoveryRate": 70.82}, {"Country": "Andorra", "Continent": "Europe", "Population": 77278.0, "TotalCases": 944, "NewCases": NaN, "TotalDeaths": 52.0, "NewDeaths": NaN, "TotalRecovered": 828.0, "NewRecovered": NaN, "ActiveCases": 64.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 12216.0, "Deaths/1M pop": 673.0, "TotalTests": 3750.0, "Tests/1M pop": 48526.0, "WHO Region": "Europe", "TestPositivityRate": 25.17, "DeathRate": 5.51, "RecoveryRate": 87.71}, {"Country": "Chad", "Continent": "Africa", "Population": 16467965.0, "TotalCases": 942, "NewCases": NaN, "TotalDeaths": 76.0, "NewDeaths": NaN, "TotalRecovered": 838.0, "NewRecovered": NaN, "ActiveCases": 28.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 57.0, "Deaths/1M pop": 5.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Africa", "TestPositivityRate": 0.0, "DeathRate": 8.07, "RecoveryRate": 88.96}, {"Country": "Gambia", "Continent": "Africa", "Population": 2422754.0, "TotalCases": 935, "NewCases": NaN, "TotalDeaths": 16.0, "NewDeaths": NaN, "TotalRecovered": 136.0, "NewRecovered": NaN, "ActiveCases": 783.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 386.0, "Deaths/1M pop": 7.0, "TotalTests": 5183.0, "Tests/1M pop": 2139.0, "WHO Region": "Africa", "TestPositivityRate": 18.04, "DeathRate": 1.71, "RecoveryRate": 14.55}, {"Country": "Sao Tome and Principe", "Continent": "Africa", "Population": 219544.0, "TotalCases": 878, "NewCases": NaN, "TotalDeaths": 15.0, "NewDeaths": NaN, "TotalRecovered": 797.0, "NewRecovered": NaN, "ActiveCases": 66.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 3999.0, "Deaths/1M pop": 68.0, "TotalTests": 3079.0, "Tests/1M pop": 14025.0, "WHO Region": "Africa", "TestPositivityRate": 28.52, "DeathRate": 1.71, "RecoveryRate": 90.77}, {"Country": "Botswana", "Continent": "Africa", "Population": 2356075.0, "TotalCases": 804, "NewCases": NaN, "TotalDeaths": 2.0, "NewDeaths": NaN, "TotalRecovered": 63.0, "NewRecovered": NaN, "ActiveCases": 739.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 341.0, "Deaths/1M pop": 0.8, "TotalTests": 68423.0, "Tests/1M pop": 29041.0, "WHO Region": "Africa", "TestPositivityRate": 1.18, "DeathRate": 0.25, "RecoveryRate": 7.84}, {"Country": "Bahamas", "Continent": "North America", "Population": 393616.0, "TotalCases": 761, "NewCases": NaN, "TotalDeaths": 14.0, "NewDeaths": NaN, "TotalRecovered": 91.0, "NewRecovered": NaN, "ActiveCases": 656.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 1933.0, "Deaths/1M pop": 36.0, "TotalTests": 4814.0, "Tests/1M pop": 12230.0, "WHO Region": "Americas", "TestPositivityRate": 15.81, "DeathRate": 1.84, "RecoveryRate": 11.96}, {"Country": "Vietnam", "Continent": "Asia", "Population": 97425470.0, "TotalCases": 747, "NewCases": NaN, "TotalDeaths": 10.0, "NewDeaths": NaN, "TotalRecovered": 392.0, "NewRecovered": NaN, "ActiveCases": 345.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 8.0, "Deaths/1M pop": 0.1, "TotalTests": 482456.0, "Tests/1M pop": 4952.0, "WHO Region": "WesternPacific", "TestPositivityRate": 0.15, "DeathRate": 1.34, "RecoveryRate": 52.48}, {"Country": "Lesotho", "Continent": "Africa", "Population": 2143943.0, "TotalCases": 742, "NewCases": NaN, "TotalDeaths": 23.0, "NewDeaths": NaN, "TotalRecovered": 175.0, "NewRecovered": NaN, "ActiveCases": 544.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 346.0, "Deaths/1M pop": 11.0, "TotalTests": 8771.0, "Tests/1M pop": 4091.0, "WHO Region": "Africa", "TestPositivityRate": 8.46, "DeathRate": 3.1, "RecoveryRate": 23.58}, {"Country": "San Marino", "Continent": "Europe", "Population": 33938.0, "TotalCases": 699, "NewCases": NaN, "TotalDeaths": 42.0, "NewDeaths": NaN, "TotalRecovered": 657.0, "NewRecovered": NaN, "ActiveCases": 0.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 20596.0, "Deaths/1M pop": 1238.0, "TotalTests": 6068.0, "Tests/1M pop": 178797.0, "WHO Region": "Europe", "TestPositivityRate": 11.52, "DeathRate": 6.01, "RecoveryRate": 93.99}, {"Country": "R\u00e9union", "Continent": "Africa", "Population": 895952.0, "TotalCases": 671, "NewCases": NaN, "TotalDeaths": 5.0, "NewDeaths": NaN, "TotalRecovered": 592.0, "NewRecovered": NaN, "ActiveCases": 74.0, "Serious,Critical": 3.0, "Tot Cases/1M pop": 749.0, "Deaths/1M pop": 6.0, "TotalTests": 35419.0, "Tests/1M pop": 39532.0, "WHO Region": NaN, "TestPositivityRate": 1.89, "DeathRate": 0.75, "RecoveryRate": 88.23}, {"Country": "Channel Islands", "Continent": "Europe", "Population": 174022.0, "TotalCases": 597, "NewCases": NaN, "TotalDeaths": 47.0, "NewDeaths": NaN, "TotalRecovered": 533.0, "NewRecovered": NaN, "ActiveCases": 17.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 3431.0, "Deaths/1M pop": 270.0, "TotalTests": 30721.0, "Tests/1M pop": 176535.0, "WHO Region": NaN, "TestPositivityRate": 1.94, "DeathRate": 7.87, "RecoveryRate": 89.28}, {"Country": "Guyana", "Continent": "South America", "Population": 786936.0, "TotalCases": 538, "NewCases": NaN, "TotalDeaths": 22.0, "NewDeaths": NaN, "TotalRecovered": 189.0, "NewRecovered": NaN, "ActiveCases": 327.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 684.0, "Deaths/1M pop": 28.0, "TotalTests": 5165.0, "Tests/1M pop": 6563.0, "WHO Region": "Americas", "TestPositivityRate": 10.42, "DeathRate": 4.09, "RecoveryRate": 35.13}, {"Country": "Tanzania", "Continent": "Africa", "Population": 59886383.0, "TotalCases": 509, "NewCases": NaN, "TotalDeaths": 21.0, "NewDeaths": NaN, "TotalRecovered": 183.0, "NewRecovered": NaN, "ActiveCases": 305.0, "Serious,Critical": 7.0, "Tot Cases/1M pop": 8.0, "Deaths/1M pop": 0.4, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Africa", "TestPositivityRate": 0.0, "DeathRate": 4.13, "RecoveryRate": 35.95}, {"Country": "Taiwan", "Continent": "Asia", "Population": 23821199.0, "TotalCases": 477, "NewCases": NaN, "TotalDeaths": 7.0, "NewDeaths": NaN, "TotalRecovered": 443.0, "NewRecovered": NaN, "ActiveCases": 27.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 20.0, "Deaths/1M pop": 0.3, "TotalTests": 82737.0, "Tests/1M pop": 3473.0, "WHO Region": "WesternPacific", "TestPositivityRate": 0.58, "DeathRate": 1.47, "RecoveryRate": 92.87}, {"Country": "Comoros", "Continent": "Africa", "Population": 871326.0, "TotalCases": 396, "NewCases": NaN, "TotalDeaths": 7.0, "NewDeaths": NaN, "TotalRecovered": 340.0, "NewRecovered": NaN, "ActiveCases": 49.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 454.0, "Deaths/1M pop": 8.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Africa", "TestPositivityRate": 0.0, "DeathRate": 1.77, "RecoveryRate": 85.86}, {"Country": "Burundi", "Continent": "Africa", "Population": 11922216.0, "TotalCases": 395, "NewCases": NaN, "TotalDeaths": 1.0, "NewDeaths": NaN, "TotalRecovered": 304.0, "NewRecovered": NaN, "ActiveCases": 90.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 33.0, "Deaths/1M pop": 0.08, "TotalTests": 15614.0, "Tests/1M pop": 1310.0, "WHO Region": "Africa", "TestPositivityRate": 2.53, "DeathRate": 0.25, "RecoveryRate": 76.96}, {"Country": "Myanmar", "Continent": "Asia", "Population": 54446389.0, "TotalCases": 357, "NewCases": NaN, "TotalDeaths": 6.0, "NewDeaths": NaN, "TotalRecovered": 308.0, "NewRecovered": NaN, "ActiveCases": 43.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 7.0, "Deaths/1M pop": 0.1, "TotalTests": 122290.0, "Tests/1M pop": 2246.0, "WHO Region": "South-EastAsia", "TestPositivityRate": 0.29, "DeathRate": 1.68, "RecoveryRate": 86.27}, {"Country": "Mauritius", "Continent": "Africa", "Population": 1271985.0, "TotalCases": 344, "NewCases": NaN, "TotalDeaths": 10.0, "NewDeaths": NaN, "TotalRecovered": 334.0, "NewRecovered": NaN, "ActiveCases": 0.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 270.0, "Deaths/1M pop": 8.0, "TotalTests": 205285.0, "Tests/1M pop": 161389.0, "WHO Region": "Africa", "TestPositivityRate": 0.17, "DeathRate": 2.91, "RecoveryRate": 97.09}, {"Country": "Isle of Man", "Continent": "Europe", "Population": 85078.0, "TotalCases": 336, "NewCases": NaN, "TotalDeaths": 24.0, "NewDeaths": NaN, "TotalRecovered": 312.0, "NewRecovered": NaN, "ActiveCases": 0.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 3949.0, "Deaths/1M pop": 282.0, "TotalTests": 8627.0, "Tests/1M pop": 101401.0, "WHO Region": NaN, "TestPositivityRate": 3.89, "DeathRate": 7.14, "RecoveryRate": 92.86}, {"Country": "Mongolia", "Continent": "Asia", "Population": 3283344.0, "TotalCases": 293, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 260.0, "NewRecovered": NaN, "ActiveCases": 33.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 89.0, "Deaths/1M pop": 0.0, "TotalTests": 38334.0, "Tests/1M pop": 11675.0, "WHO Region": "WesternPacific", "TestPositivityRate": 0.76, "DeathRate": 0.0, "RecoveryRate": 88.74}, {"Country": "Eritrea", "Continent": "Africa", "Population": 3551175.0, "TotalCases": 282, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 225.0, "NewRecovered": NaN, "ActiveCases": 57.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 79.0, "Deaths/1M pop": 0.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Africa", "TestPositivityRate": 0.0, "DeathRate": 0.0, "RecoveryRate": 79.79}, {"Country": "Guadeloupe", "Continent": "North America", "Population": 400131.0, "TotalCases": 279, "NewCases": NaN, "TotalDeaths": 14.0, "NewDeaths": NaN, "TotalRecovered": 179.0, "NewRecovered": NaN, "ActiveCases": 86.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 697.0, "Deaths/1M pop": 35.0, "TotalTests": 18476.0, "Tests/1M pop": 46175.0, "WHO Region": NaN, "TestPositivityRate": 1.51, "DeathRate": 5.02, "RecoveryRate": 64.16}, {"Country": "Martinique", "Continent": "North America", "Population": 375235.0, "TotalCases": 276, "NewCases": NaN, "TotalDeaths": 15.0, "NewDeaths": NaN, "TotalRecovered": 98.0, "NewRecovered": NaN, "ActiveCases": 163.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 736.0, "Deaths/1M pop": 40.0, "TotalTests": 12227.0, "Tests/1M pop": 32585.0, "WHO Region": NaN, "TestPositivityRate": 2.26, "DeathRate": 5.43, "RecoveryRate": 35.51}, {"Country": "Faeroe Islands", "Continent": "Europe", "Population": 48882.0, "TotalCases": 266, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 192.0, "NewRecovered": NaN, "ActiveCases": 74.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 5442.0, "Deaths/1M pop": 0.0, "TotalTests": 43045.0, "Tests/1M pop": 880590.0, "WHO Region": NaN, "TestPositivityRate": 0.62, "DeathRate": 0.0, "RecoveryRate": 72.18}, {"Country": "Aruba", "Continent": "North America", "Population": 106812.0, "TotalCases": 263, "NewCases": NaN, "TotalDeaths": 3.0, "NewDeaths": NaN, "TotalRecovered": 114.0, "NewRecovered": NaN, "ActiveCases": 146.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 2462.0, "Deaths/1M pop": 28.0, "TotalTests": 14047.0, "Tests/1M pop": 131511.0, "WHO Region": NaN, "TestPositivityRate": 1.87, "DeathRate": 1.14, "RecoveryRate": 43.35}, {"Country": "Cambodia", "Continent": "Asia", "Population": 16741375.0, "TotalCases": 243, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 210.0, "NewRecovered": NaN, "ActiveCases": 33.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 15.0, "Deaths/1M pop": 0.0, "TotalTests": 67807.0, "Tests/1M pop": 4050.0, "WHO Region": "WesternPacific", "TestPositivityRate": 0.36, "DeathRate": 0.0, "RecoveryRate": 86.42}, {"Country": "Trinidad and Tobago", "Continent": "North America", "Population": 1399950.0, "TotalCases": 210, "NewCases": NaN, "TotalDeaths": 8.0, "NewDeaths": NaN, "TotalRecovered": 135.0, "NewRecovered": NaN, "ActiveCases": 67.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 150.0, "Deaths/1M pop": 6.0, "TotalTests": 9559.0, "Tests/1M pop": 6828.0, "WHO Region": "Americas", "TestPositivityRate": 2.2, "DeathRate": 3.81, "RecoveryRate": 64.29}, {"Country": "Cayman Islands", "Continent": "North America", "Population": 65798.0, "TotalCases": 203, "NewCases": NaN, "TotalDeaths": 1.0, "NewDeaths": NaN, "TotalRecovered": 202.0, "NewRecovered": NaN, "ActiveCases": 0.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 3085.0, "Deaths/1M pop": 15.0, "TotalTests": 31108.0, "Tests/1M pop": 472780.0, "WHO Region": NaN, "TestPositivityRate": 0.65, "DeathRate": 0.49, "RecoveryRate": 99.51}, {"Country": "Gibraltar", "Continent": "Europe", "Population": 33690.0, "TotalCases": 190, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 184.0, "NewRecovered": NaN, "ActiveCases": 6.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 5640.0, "Deaths/1M pop": 0.0, "TotalTests": 23063.0, "Tests/1M pop": 684565.0, "WHO Region": NaN, "TestPositivityRate": 0.82, "DeathRate": 0.0, "RecoveryRate": 96.84}, {"Country": "Papua New Guinea", "Continent": "Australia/Oceania", "Population": 8963009.0, "TotalCases": 163, "NewCases": NaN, "TotalDeaths": 3.0, "NewDeaths": NaN, "TotalRecovered": 53.0, "NewRecovered": NaN, "ActiveCases": 107.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 18.0, "Deaths/1M pop": 0.3, "TotalTests": 10808.0, "Tests/1M pop": 1206.0, "WHO Region": "WesternPacific", "TestPositivityRate": 1.51, "DeathRate": 1.84, "RecoveryRate": 32.52}, {"Country": "Sint Maarten", "Continent": "North America", "Population": 42924.0, "TotalCases": 160, "NewCases": NaN, "TotalDeaths": 16.0, "NewDeaths": NaN, "TotalRecovered": 64.0, "NewRecovered": NaN, "ActiveCases": 80.0, "Serious,Critical": 3.0, "Tot Cases/1M pop": 3728.0, "Deaths/1M pop": 373.0, "TotalTests": 1115.0, "Tests/1M pop": 25976.0, "WHO Region": NaN, "TestPositivityRate": 14.35, "DeathRate": 10.0, "RecoveryRate": 40.0}, {"Country": "Bermuda", "Continent": "North America", "Population": 62254.0, "TotalCases": 157, "NewCases": NaN, "TotalDeaths": 9.0, "NewDeaths": NaN, "TotalRecovered": 144.0, "NewRecovered": NaN, "ActiveCases": 4.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 2522.0, "Deaths/1M pop": 145.0, "TotalTests": 26352.0, "Tests/1M pop": 423298.0, "WHO Region": "Americas", "TestPositivityRate": 0.6, "DeathRate": 5.73, "RecoveryRate": 91.72}, {"Country": "Brunei ", "Continent": "Asia", "Population": 437893.0, "TotalCases": 141, "NewCases": NaN, "TotalDeaths": 3.0, "NewDeaths": NaN, "TotalRecovered": 138.0, "NewRecovered": NaN, "ActiveCases": 0.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 322.0, "Deaths/1M pop": 7.0, "TotalTests": 41148.0, "Tests/1M pop": 93968.0, "WHO Region": NaN, "TestPositivityRate": 0.34, "DeathRate": 2.13, "RecoveryRate": 97.87}, {"Country": "Barbados", "Continent": "North America", "Population": 287411.0, "TotalCases": 133, "NewCases": NaN, "TotalDeaths": 7.0, "NewDeaths": NaN, "TotalRecovered": 100.0, "NewRecovered": NaN, "ActiveCases": 26.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 463.0, "Deaths/1M pop": 24.0, "TotalTests": 12233.0, "Tests/1M pop": 42563.0, "WHO Region": "Americas", "TestPositivityRate": 1.09, "DeathRate": 5.26, "RecoveryRate": 75.19}, {"Country": "Turks and Caicos", "Continent": "North America", "Population": 38768.0, "TotalCases": 129, "NewCases": NaN, "TotalDeaths": 2.0, "NewDeaths": NaN, "TotalRecovered": 39.0, "NewRecovered": NaN, "ActiveCases": 88.0, "Serious,Critical": 3.0, "Tot Cases/1M pop": 3327.0, "Deaths/1M pop": 52.0, "TotalTests": 1252.0, "Tests/1M pop": 32295.0, "WHO Region": NaN, "TestPositivityRate": 10.3, "DeathRate": 1.55, "RecoveryRate": 30.23}, {"Country": "Seychelles", "Continent": "Africa", "Population": 98408.0, "TotalCases": 126, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 124.0, "NewRecovered": NaN, "ActiveCases": 2.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 1280.0, "Deaths/1M pop": 0.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Africa", "TestPositivityRate": 0.0, "DeathRate": 0.0, "RecoveryRate": 98.41}, {"Country": "Monaco", "Continent": "Europe", "Population": 39270.0, "TotalCases": 125, "NewCases": NaN, "TotalDeaths": 4.0, "NewDeaths": NaN, "TotalRecovered": 105.0, "NewRecovered": NaN, "ActiveCases": 16.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 3183.0, "Deaths/1M pop": 102.0, "TotalTests": 38209.0, "Tests/1M pop": 972982.0, "WHO Region": "Europe", "TestPositivityRate": 0.33, "DeathRate": 3.2, "RecoveryRate": 84.0}, {"Country": "Bhutan", "Continent": "Asia", "Population": 772443.0, "TotalCases": 105, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 93.0, "NewRecovered": NaN, "ActiveCases": 12.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 136.0, "Deaths/1M pop": 0.0, "TotalTests": 54589.0, "Tests/1M pop": 70671.0, "WHO Region": "South-EastAsia", "TestPositivityRate": 0.19, "DeathRate": 0.0, "RecoveryRate": 88.57}, {"Country": "Antigua and Barbuda", "Continent": "North America", "Population": 98010.0, "TotalCases": 92, "NewCases": NaN, "TotalDeaths": 3.0, "NewDeaths": NaN, "TotalRecovered": 76.0, "NewRecovered": NaN, "ActiveCases": 13.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 939.0, "Deaths/1M pop": 31.0, "TotalTests": 1500.0, "Tests/1M pop": 15305.0, "WHO Region": "Americas", "TestPositivityRate": 6.13, "DeathRate": 3.26, "RecoveryRate": 82.61}, {"Country": "Liechtenstein", "Continent": "Europe", "Population": 38139.0, "TotalCases": 89, "NewCases": NaN, "TotalDeaths": 1.0, "NewDeaths": NaN, "TotalRecovered": 85.0, "NewRecovered": NaN, "ActiveCases": 3.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 2334.0, "Deaths/1M pop": 26.0, "TotalTests": 900.0, "Tests/1M pop": 23598.0, "WHO Region": "Europe", "TestPositivityRate": 9.89, "DeathRate": 1.12, "RecoveryRate": 95.51}, {"Country": "Belize", "Continent": "North America", "Population": 398312.0, "TotalCases": 86, "NewCases": NaN, "TotalDeaths": 2.0, "NewDeaths": NaN, "TotalRecovered": 31.0, "NewRecovered": NaN, "ActiveCases": 53.0, "Serious,Critical": 2.0, "Tot Cases/1M pop": 216.0, "Deaths/1M pop": 5.0, "TotalTests": 3679.0, "Tests/1M pop": 9236.0, "WHO Region": "Americas", "TestPositivityRate": 2.34, "DeathRate": 2.33, "RecoveryRate": 36.05}, {"Country": "French Polynesia", "Continent": "Australia/Oceania", "Population": 281072.0, "TotalCases": 64, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 62.0, "NewRecovered": NaN, "ActiveCases": 2.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 228.0, "Deaths/1M pop": 0.0, "TotalTests": 5849.0, "Tests/1M pop": 20810.0, "WHO Region": NaN, "TestPositivityRate": 1.09, "DeathRate": 0.0, "RecoveryRate": 96.88}, {"Country": "St. Vincent Grenadines", "Continent": "North America", "Population": 110976.0, "TotalCases": 56, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 46.0, "NewRecovered": NaN, "ActiveCases": 10.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 505.0, "Deaths/1M pop": 0.0, "TotalTests": 2447.0, "Tests/1M pop": 22050.0, "WHO Region": NaN, "TestPositivityRate": 2.29, "DeathRate": 0.0, "RecoveryRate": 82.14}, {"Country": "Saint Martin", "Continent": "North America", "Population": 38729.0, "TotalCases": 53, "NewCases": NaN, "TotalDeaths": 3.0, "NewDeaths": NaN, "TotalRecovered": 41.0, "NewRecovered": NaN, "ActiveCases": 9.0, "Serious,Critical": 1.0, "Tot Cases/1M pop": 1368.0, "Deaths/1M pop": 77.0, "TotalTests": 1183.0, "Tests/1M pop": 30546.0, "WHO Region": NaN, "TestPositivityRate": 4.48, "DeathRate": 5.66, "RecoveryRate": 77.36}, {"Country": "Macao", "Continent": "Asia", "Population": 650193.0, "TotalCases": 46, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 46.0, "NewRecovered": NaN, "ActiveCases": 0.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 71.0, "Deaths/1M pop": 0.0, "TotalTests": 4071.0, "Tests/1M pop": 6261.0, "WHO Region": NaN, "TestPositivityRate": 1.13, "DeathRate": 0.0, "RecoveryRate": 100.0}, {"Country": "Cura\u00e7ao", "Continent": "North America", "Population": 164161.0, "TotalCases": 31, "NewCases": NaN, "TotalDeaths": 1.0, "NewDeaths": NaN, "TotalRecovered": 28.0, "NewRecovered": NaN, "ActiveCases": 2.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 189.0, "Deaths/1M pop": 6.0, "TotalTests": 1080.0, "Tests/1M pop": 6579.0, "WHO Region": NaN, "TestPositivityRate": 2.87, "DeathRate": 3.23, "RecoveryRate": 90.32}, {"Country": "Fiji", "Continent": "Australia/Oceania", "Population": 897095.0, "TotalCases": 27, "NewCases": NaN, "TotalDeaths": 1.0, "NewDeaths": NaN, "TotalRecovered": 18.0, "NewRecovered": NaN, "ActiveCases": 8.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 30.0, "Deaths/1M pop": 1.0, "TotalTests": 6693.0, "Tests/1M pop": 7461.0, "WHO Region": "WesternPacific", "TestPositivityRate": 0.4, "DeathRate": 3.7, "RecoveryRate": 66.67}, {"Country": "Saint Lucia", "Continent": "North America", "Population": 183712.0, "TotalCases": 25, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 24.0, "NewRecovered": NaN, "ActiveCases": 1.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 136.0, "Deaths/1M pop": 0.0, "TotalTests": 3895.0, "Tests/1M pop": 21202.0, "WHO Region": "Americas", "TestPositivityRate": 0.64, "DeathRate": 0.0, "RecoveryRate": 96.0}, {"Country": "Timor-Leste", "Continent": "Asia", "Population": 1320812.0, "TotalCases": 25, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 24.0, "NewRecovered": NaN, "ActiveCases": 1.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 19.0, "Deaths/1M pop": 0.0, "TotalTests": 4238.0, "Tests/1M pop": 3209.0, "WHO Region": "South-EastAsia", "TestPositivityRate": 0.59, "DeathRate": 0.0, "RecoveryRate": 96.0}, {"Country": "Grenada", "Continent": "North America", "Population": 112576.0, "TotalCases": 24, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 23.0, "NewRecovered": NaN, "ActiveCases": 1.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 213.0, "Deaths/1M pop": 0.0, "TotalTests": 6252.0, "Tests/1M pop": 55536.0, "WHO Region": "Americas", "TestPositivityRate": 0.38, "DeathRate": 0.0, "RecoveryRate": 95.83}, {"Country": "New Caledonia", "Continent": "Australia/Oceania", "Population": 285769.0, "TotalCases": 22, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 22.0, "NewRecovered": NaN, "ActiveCases": 0.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 77.0, "Deaths/1M pop": 0.0, "TotalTests": 11099.0, "Tests/1M pop": 38839.0, "WHO Region": NaN, "TestPositivityRate": 0.2, "DeathRate": 0.0, "RecoveryRate": 100.0}, {"Country": "Laos", "Continent": "Asia", "Population": 7285750.0, "TotalCases": 20, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 19.0, "NewRecovered": NaN, "ActiveCases": 1.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 3.0, "Deaths/1M pop": 0.0, "TotalTests": 29374.0, "Tests/1M pop": 4032.0, "WHO Region": "WesternPacific", "TestPositivityRate": 0.07, "DeathRate": 0.0, "RecoveryRate": 95.0}, {"Country": "Dominica", "Continent": "North America", "Population": 72004.0, "TotalCases": 18, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 18.0, "NewRecovered": NaN, "ActiveCases": 0.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 250.0, "Deaths/1M pop": 0.0, "TotalTests": 1005.0, "Tests/1M pop": 13958.0, "WHO Region": "Americas", "TestPositivityRate": 1.79, "DeathRate": 0.0, "RecoveryRate": 100.0}, {"Country": "Saint Kitts and Nevis", "Continent": "North America", "Population": 53237.0, "TotalCases": 17, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 16.0, "NewRecovered": NaN, "ActiveCases": 1.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 319.0, "Deaths/1M pop": 0.0, "TotalTests": 1146.0, "Tests/1M pop": 21526.0, "WHO Region": "Americas", "TestPositivityRate": 1.48, "DeathRate": 0.0, "RecoveryRate": 94.12}, {"Country": "Greenland", "Continent": "North America", "Population": 56780.0, "TotalCases": 14, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 14.0, "NewRecovered": NaN, "ActiveCases": 0.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 247.0, "Deaths/1M pop": 0.0, "TotalTests": 5977.0, "Tests/1M pop": 105266.0, "WHO Region": "Europe", "TestPositivityRate": 0.23, "DeathRate": 0.0, "RecoveryRate": 100.0}, {"Country": "Montserrat", "Continent": "North America", "Population": 4992.0, "TotalCases": 13, "NewCases": NaN, "TotalDeaths": 1.0, "NewDeaths": NaN, "TotalRecovered": 10.0, "NewRecovered": NaN, "ActiveCases": 2.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 2604.0, "Deaths/1M pop": 200.0, "TotalTests": 61.0, "Tests/1M pop": 12220.0, "WHO Region": NaN, "TestPositivityRate": 21.31, "DeathRate": 7.69, "RecoveryRate": 76.92}, {"Country": "Caribbean Netherlands", "Continent": "North America", "Population": 26247.0, "TotalCases": 13, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 7.0, "NewRecovered": NaN, "ActiveCases": 6.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 495.0, "Deaths/1M pop": 0.0, "TotalTests": 424.0, "Tests/1M pop": 16154.0, "WHO Region": NaN, "TestPositivityRate": 3.07, "DeathRate": 0.0, "RecoveryRate": 53.85}, {"Country": "Falkland Islands", "Continent": "South America", "Population": 3489.0, "TotalCases": 13, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 13.0, "NewRecovered": NaN, "ActiveCases": 0.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 3726.0, "Deaths/1M pop": 0.0, "TotalTests": 1816.0, "Tests/1M pop": 520493.0, "WHO Region": NaN, "TestPositivityRate": 0.72, "DeathRate": 0.0, "RecoveryRate": 100.0}, {"Country": "Vatican City", "Continent": "Europe", "Population": 801.0, "TotalCases": 12, "NewCases": NaN, "TotalDeaths": 0.0, "NewDeaths": NaN, "TotalRecovered": 12.0, "NewRecovered": NaN, "ActiveCases": 0.0, "Serious,Critical": NaN, "Tot Cases/1M pop": 14981.0, "Deaths/1M pop": 0.0, "TotalTests": 0.0, "Tests/1M pop": 0.0, "WHO Region": "Europe", "TestPositivityRate": 0.0, "DeathRate": 0.0, "RecoveryRate": 100.0}];
+(function() { const data = __WORLD_DATA__; {
+  allData = data;
+  updateAll();
+  document.getElementById('metricSelect').addEventListener('change', e => {
+    currentMetric = e.target.value;
+    updateAll();
+  });
+  }})();
+
+function getFiltered() {
+  let d = allData;
+  if (selectedContinent) d = d.filter(x => x.Continent === selectedContinent);
+  if (selectedCountry)   d = d.filter(x => x.Country === selectedCountry);
+  return d;
+}
+
+function updateAll() {
+  const filtered = getFiltered();
+  updateKPIs(filtered);
+  drawBubble(filtered);
+  drawBar(filtered);
+  drawDonut(filtered);
+  drawScatter(filtered);
+  drawMap();
+  updateBadge();
+}
+
+function updateBadge() {
+  const b = document.getElementById('selectedBadge');
+  if (selectedContinent || selectedCountry) {
+    b.style.display='inline-block';
+    b.textContent = selectedCountry || selectedContinent;
+  } else {
+    b.style.display='none';
+  }
+}
+
+function clearFilters() {
+  selectedContinent = null;
+  selectedCountry = null;
+  updateAll();
+}
+
+function toggleFS() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
+}
+
+// ─── KPIs ───
+function updateKPIs(data) {
+  const sum = (k,d=data) => d3.sum(d, x=>+x[k]||0);
+  document.getElementById('kpiConfirmed').textContent = fmtM(sum('TotalCases'));
+  document.getElementById('kpiDeaths').textContent    = fmtM(sum('TotalDeaths'));
+  document.getElementById('kpiTests').textContent     = fmtM(sum('TotalTests'));
+  const avgRate = d3.mean(data, x=>+x['DeathRate']||0);
+  document.getElementById('kpiRate').textContent      = (avgRate||0).toFixed(2)+'%';
+  document.getElementById('kpiCountries').textContent = data.length;
+}
+
+// ─── WORLD MAP ───
+function drawMap() {
+  const el = document.getElementById('mapContainer');
+  el.innerHTML='';
+  const W = el.parentElement.clientWidth - 32;
+  const H = Math.round(W * 0.48);
+
+  const svg = d3.select(el).append('svg').attr('width',W).attr('height',H);
+  const proj = d3.geoNaturalEarth1().scale(W/6.2).translate([W/2, H/2]);
+  const path = d3.geoPath().projection(proj);
+
+  const metric = currentMetric;
+  const vals = allData.map(d=>+d[metric]||0).filter(v=>v>0);
+  const colorScale = d3.scaleSequentialLog(d3.interpolateYlOrRd)
+    .domain([d3.quantile(vals,0.05)||1, d3.quantile(vals,0.95)||1000]);
+
+  const countryMap = {};
+  allData.forEach(d=>{ countryMap[d.Country]=d; });
+
+  Promise.all([
+    d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+  ]).then(([world]) => {
+    const countries = topojson.feature(world, world.objects.countries);
+    const nameMap = {};
+    // simple iso numeric → name lookup via data
+    allData.forEach(d=>{ nameMap[d.Country]=d; });
+
+    svg.append('rect').attr('width',W).attr('height',H).attr('fill','#0d1117');
+    svg.append('g').selectAll('path')
+      .data(countries.features)
+      .join('path')
+        .attr('d', path)
+        .attr('fill', f => {
+          // match by name property
+          const name = f.properties && f.properties.name;
+          const d = countryMap[name];
+          if (!d) return '#21262d';
+          const v = +d[metric]||0;
+          return v > 0 ? colorScale(v) : '#21262d';
+        })
+        .attr('stroke','#30363d').attr('stroke-width',0.4)
+        .on('mouseover', (event,f) => {
+          const name = f.properties && f.properties.name;
+          const d = countryMap[name];
+          if (!d) return;
+          showTip(`<b>${d.Country}</b><br>
+            ${metric}: <b>${(+d[metric]||0).toLocaleString()}</b><br>
+            Continent: ${d.Continent}<br>
+            Deaths/1M: ${d['Deaths/1M pop']}<br>
+            Tests/1M: ${(d['Tests/1M pop']||0).toLocaleString()}`, event);
+          d3.select(event.currentTarget).attr('stroke','#58a6ff').attr('stroke-width',1.5);
+        })
+        .on('mousemove', (event) => {
+          tip.style('left',(event.clientX+14)+'px').style('top',(event.clientY-10)+'px');
+        })
+        .on('mouseout', (event) => {
+          hideTip();
+          d3.select(event.currentTarget).attr('stroke','#30363d').attr('stroke-width',0.4);
+        })
+        .on('click', (event,f) => {
+          const name = f.properties && f.properties.name;
+          const d = countryMap[name];
+          if (!d) return;
+          selectedCountry = selectedCountry === d.Country ? null : d.Country;
+          selectedContinent = null;
+          updateAll();
+        });
+
+    // Legend
+    const legendEl = document.getElementById('mapLegend');
+    legendEl.innerHTML='';
+    const lsvg = d3.select(legendEl).append('svg').attr('width',260).attr('height',28);
+    const defs = lsvg.append('defs');
+    const lg = defs.append('linearGradient').attr('id','mapGrad');
+    lg.selectAll('stop').data([0,.25,.5,.75,1]).join('stop')
+      .attr('offset',d=>d*100+'%')
+      .attr('stop-color',d=>colorScale(colorScale.domain()[0]*Math.pow(colorScale.domain()[1]/colorScale.domain()[0],d)));
+    lsvg.append('rect').attr('x',0).attr('y',4).attr('width',200).attr('height',14)
+      .attr('fill','url(#mapGrad)').attr('rx',3);
+    lsvg.append('text').attr('x',0).attr('y',26).attr('fill','#8b949e').attr('font-size',10)
+      .text('Low');
+    lsvg.append('text').attr('x',205).attr('y',26).attr('fill','#8b949e').attr('font-size',10)
+      .text('High');
+    lsvg.append('text').attr('x',100).attr('y',26).attr('text-anchor','middle').attr('fill','#8b949e').attr('font-size',10)
+      .text(metric);
+  });
+}
+
+// ─── BUBBLE CHART ───
+function drawBubble(data) {
+  const el = document.getElementById('bubbleContainer');
+  el.innerHTML='';
+  const W = el.parentElement.clientWidth - 32;
+  const H = 300;
+  const margin = {top:10,right:20,bottom:50,left:60};
+  const iW = W-margin.left-margin.right;
+  const iH = H-margin.top-margin.bottom;
+
+  const svg = d3.select(el).append('svg').attr('width',W).attr('height',H)
+    .append('g').attr('transform',`translate(${margin.left},${margin.top})`);
+
+  const valid = data.filter(d=>d['Tests/1M pop']>0 && d['Deaths/1M pop']>0);
+
+  const x = d3.scaleLog().domain([1,d3.max(valid,d=>+d['Tests/1M pop'])||1]).range([0,iW]).nice();
+  const y = d3.scaleLog().domain([0.1,d3.max(valid,d=>+d['Deaths/1M pop'])||1]).range([iH,0]).nice();
+  const r = d3.scaleSqrt().domain([0,d3.max(valid,d=>+d.Population)||1]).range([3,28]);
+
+  svg.append('g').attr('transform',`translate(0,${iH})`).call(d3.axisBottom(x).ticks(5,',.0f'))
+    .selectAll('text,line,path').attr('stroke','#8b949e').attr('fill','#8b949e');
+  svg.append('g').call(d3.axisLeft(y).ticks(5,',.0f'))
+    .selectAll('text,line,path').attr('stroke','#8b949e').attr('fill','#8b949e');
+
+  svg.selectAll('.domain').attr('stroke','#30363d');
+
+  // Grid lines
+  svg.append('g').attr('class','grid').call(d3.axisLeft(y).ticks(5).tickSize(-iW).tickFormat(''))
+    .selectAll('line').attr('stroke','#21262d').attr('stroke-dasharray','3,3');
+  svg.append('g').attr('class','grid').attr('transform',`translate(0,${iH})`)
+    .call(d3.axisBottom(x).ticks(5).tickSize(-iH).tickFormat(''))
+    .selectAll('line').attr('stroke','#21262d').attr('stroke-dasharray','3,3');
+
+  svg.selectAll('circle').data(valid.sort((a,b)=>b.Population-a.Population))
+    .join('circle')
+    .attr('cx',d=>x(+d['Tests/1M pop']||1))
+    .attr('cy',d=>y(+d['Deaths/1M pop']||0.1))
+    .attr('r',d=>r(+d.Population||0))
+    .attr('fill',d=>CONT_COLORS[d.Continent]||'#888')
+    .attr('fill-opacity',0.7)
+    .attr('stroke',d=>selectedCountry===d.Country?'#fff':'none')
+    .attr('stroke-width',2)
+    .on('mouseover',(event,d)=>{
+      showTip(`<b>${d.Country}</b><br>
+        Continent: ${d.Continent}<br>
+        Tests/1M: <b>${(+d['Tests/1M pop']||0).toLocaleString()}</b><br>
+        Deaths/1M: <b>${d['Deaths/1M pop']}</b><br>
+        Population: ${fmtM(+d.Population||0)}<br>
+        Death Rate: ${d.DeathRate}%`,event);
+    })
+    .on('mousemove',event=>tip.style('left',(event.clientX+14)+'px').style('top',(event.clientY-10)+'px'))
+    .on('mouseout',hideTip)
+    .on('click',(event,d)=>{
+      selectedCountry = selectedCountry===d.Country?null:d.Country;
+      selectedContinent=null; updateAll();
+    });
+
+  // Axis labels
+  svg.append('text').attr('x',iW/2).attr('y',iH+42).attr('text-anchor','middle')
+    .attr('fill','#8b949e').attr('font-size',11).text('Tests per 1M population (log)');
+  svg.append('text').attr('transform','rotate(-90)').attr('x',-iH/2).attr('y',-48)
+    .attr('text-anchor','middle').attr('fill','#8b949e').attr('font-size',11).text('Deaths per 1M (log)');
+
+  // Legend
+  const lg = d3.select('#bubbleLegend');
+  lg.html('');
+  Object.entries(CONT_COLORS).forEach(([c,col])=>{
+    lg.append('div').attr('class','legend-item')
+      .on('click',()=>{ selectedContinent=selectedContinent===c?null:c; selectedCountry=null; updateAll(); })
+      .html(`<div class="legend-dot" style="background:${col}"></div>${c}`);
+  });
+}
+
+// ─── BAR CHART ───
+function drawBar(data) {
+  const el = document.getElementById('barContainer');
+  el.innerHTML='';
+  const W = el.parentElement.clientWidth - 32;
+  const metric = currentMetric;
+  const top20 = [...data].filter(d=>+d[metric]>0).sort((a,b)=>b[metric]-a[metric]).slice(0,20);
+
+  const margin = {top:10,right:20,bottom:10,left:120};
+  const H = top20.length*22+margin.top+margin.bottom;
+  const iW = W-margin.left-margin.right;
+  const iH = H-margin.top-margin.bottom;
+
+  const svg = d3.select(el).append('svg').attr('width',W).attr('height',H)
+    .append('g').attr('transform',`translate(${margin.left},${margin.top})`);
+
+  const x = d3.scaleLinear().domain([0,d3.max(top20,d=>+d[metric]||0)]).range([0,iW]);
+  const y = d3.scaleBand().domain(top20.map(d=>d.Country)).range([0,iH]).padding(0.25);
+
+  svg.append('g').call(d3.axisLeft(y).tickSize(0))
+    .selectAll('text').attr('fill','#e6edf3').attr('font-size',11);
+  svg.selectAll('.domain,.tick line').attr('stroke','none');
+
+  svg.selectAll('rect').data(top20).join('rect')
+    .attr('x',0).attr('y',d=>y(d.Country))
+    .attr('width',d=>x(+d[metric]||0)).attr('height',y.bandwidth())
+    .attr('fill',d=>CONT_COLORS[d.Continent]||'#58a6ff')
+    .attr('fill-opacity',d=>selectedCountry===d.Country?1:0.75)
+    .attr('rx',3)
+    .on('mouseover',(event,d)=>{
+      showTip(`<b>${d.Country}</b><br>${metric}: <b>${(+d[metric]||0).toLocaleString()}</b><br>Continent: ${d.Continent}`,event);
+    })
+    .on('mousemove',event=>tip.style('left',(event.clientX+14)+'px').style('top',(event.clientY-10)+'px'))
+    .on('mouseout',hideTip)
+    .on('click',(event,d)=>{
+      selectedCountry=selectedCountry===d.Country?null:d.Country;
+      selectedContinent=null; updateAll();
+    });
+
+  svg.selectAll('.bar-label').data(top20).join('text')
+    .attr('class','bar-label')
+    .attr('x',d=>x(+d[metric]||0)+4).attr('y',d=>y(d.Country)+y.bandwidth()/2+4)
+    .attr('fill','#8b949e').attr('font-size',10)
+    .text(d=>(+d[metric]||0).toLocaleString());
+}
+
+// ─── DONUT CHART ───
+function drawDonut(data) {
+  const el = document.getElementById('donutContainer');
+  el.innerHTML='';
+  const W = el.parentElement.clientWidth - 32;
+  const H = 300;
+  const R = Math.min(W,H)/2 - 20;
+
+  const svg = d3.select(el).append('svg').attr('width',W).attr('height',H)
+    .append('g').attr('transform',`translate(${W/2},${H/2})`);
+
+  const metric = currentMetric;
+  const byContinent = d3.rollup(data, v=>d3.sum(v,d=>+d[metric]||0), d=>d.Continent);
+  const pie = d3.pie().value(d=>d[1]).sort(null)(Array.from(byContinent));
+  const arc = d3.arc().innerRadius(R*0.55).outerRadius(R);
+  const arcHover = d3.arc().innerRadius(R*0.52).outerRadius(R+6);
+
+  svg.selectAll('path').data(pie).join('path')
+    .attr('d',arc)
+    .attr('fill',d=>CONT_COLORS[d.data[0]]||'#888')
+    .attr('fill-opacity',d=>selectedContinent===d.data[0]?1:0.75)
+    .attr('stroke','#0d1117').attr('stroke-width',2)
+    .on('mouseover',(event,d)=>{
+      d3.select(event.currentTarget).attr('d',arcHover);
+      const total = d3.sum(Array.from(byContinent.values()));
+      showTip(`<b>${d.data[0]}</b><br>
+        ${metric}: <b>${d.data[1].toLocaleString()}</b><br>
+        Share: ${(d.data[1]/total*100).toFixed(1)}%`,event);
+    })
+    .on('mousemove',event=>tip.style('left',(event.clientX+14)+'px').style('top',(event.clientY-10)+'px'))
+    .on('mouseout',(event)=>{ d3.select(event.currentTarget).attr('d',arc); hideTip(); })
+    .on('click',(event,d)=>{
+      selectedContinent=selectedContinent===d.data[0]?null:d.data[0];
+      selectedCountry=null; updateAll();
+    });
+
+  // Labels
+  svg.selectAll('.pie-label').data(pie.filter(d=>d.endAngle-d.startAngle>0.3)).join('text')
+    .attr('class','pie-label')
+    .attr('transform',d=>`translate(${arc.centroid(d)})`)
+    .attr('text-anchor','middle').attr('fill','#fff').attr('font-size',10).attr('font-weight','600')
+    .text(d=>d.data[0].split(' ')[0]);
+
+  // Center text
+  const total = d3.sum(Array.from(byContinent.values()));
+  svg.append('text').attr('text-anchor','middle').attr('y',-8)
+    .attr('fill','#e6edf3').attr('font-size',13).attr('font-weight','600')
+    .text('Total');
+  svg.append('text').attr('text-anchor','middle').attr('y',12)
+    .attr('fill','#58a6ff').attr('font-size',14).attr('font-weight','700')
+    .text(fmtM(total));
+  svg.append('text').attr('text-anchor','middle').attr('y',28)
+    .attr('fill','#8b949e').attr('font-size',9).text(metric);
+}
+
+// ─── SCATTER: Death Rate vs Test Positivity ───
+function drawScatter(data) {
+  const el = document.getElementById('scatterContainer');
+  el.innerHTML='';
+  const W = el.parentElement.clientWidth - 32;
+  const H = 280;
+  const margin = {top:10,right:20,bottom:50,left:55};
+  const iW = W-margin.left-margin.right;
+  const iH = H-margin.top-margin.bottom;
+
+  const valid = data.filter(d=>d.DeathRate>0 && d.TestPositivityRate>0);
+
+  const svg = d3.select(el).append('svg').attr('width',W).attr('height',H)
+    .append('g').attr('transform',`translate(${margin.left},${margin.top})`);
+
+  const x = d3.scaleLinear().domain([0,d3.max(valid,d=>+d.TestPositivityRate)||50]).range([0,iW]).nice();
+  const y = d3.scaleLinear().domain([0,d3.max(valid,d=>+d.DeathRate)||20]).range([iH,0]).nice();
+
+  svg.append('g').attr('transform',`translate(0,${iH})`).call(d3.axisBottom(x).ticks(6))
+    .selectAll('text,line,path').attr('stroke','#8b949e').attr('fill','#8b949e');
+  svg.append('g').call(d3.axisLeft(y).ticks(5))
+    .selectAll('text,line,path').attr('stroke','#8b949e').attr('fill','#8b949e');
+  svg.selectAll('.domain').attr('stroke','#30363d');
+
+  // grid
+  svg.append('g').call(d3.axisLeft(y).ticks(5).tickSize(-iW).tickFormat(''))
+    .selectAll('line').attr('stroke','#21262d');
+
+  // trend line (linear regression)
+  if (valid.length > 3) {
+    const n = valid.length;
+    const mx = d3.mean(valid,d=>+d.TestPositivityRate);
+    const my = d3.mean(valid,d=>+d.DeathRate);
+    const num = d3.sum(valid,d=>(+d.TestPositivityRate-mx)*(+d.DeathRate-my));
+    const den = d3.sum(valid,d=>(+d.TestPositivityRate-mx)**2);
+    const slope = den>0?num/den:0;
+    const intercept = my - slope*mx;
+    const x1=0, y1=intercept, x2=x.domain()[1], y2=slope*x2+intercept;
+    svg.append('line')
+      .attr('x1',x(x1)).attr('y1',y(Math.max(0,y1)))
+      .attr('x2',x(x2)).attr('y2',y(Math.max(0,y2)))
+      .attr('stroke','#ffffff44').attr('stroke-width',1.5).attr('stroke-dasharray','5,4');
+  }
+
+  svg.selectAll('circle').data(valid).join('circle')
+    .attr('cx',d=>x(+d.TestPositivityRate||0))
+    .attr('cy',d=>y(+d.DeathRate||0))
+    .attr('r',5).attr('fill',d=>CONT_COLORS[d.Continent]||'#888')
+    .attr('fill-opacity',0.8)
+    .attr('stroke',d=>selectedCountry===d.Country?'#fff':'none').attr('stroke-width',2)
+    .on('mouseover',(event,d)=>{
+      showTip(`<b>${d.Country}</b><br>
+        Test Positivity: <b>${d.TestPositivityRate}%</b><br>
+        Death Rate: <b>${d.DeathRate}%</b><br>
+        Continent: ${d.Continent}`,event);
+    })
+    .on('mousemove',event=>tip.style('left',(event.clientX+14)+'px').style('top',(event.clientY-10)+'px'))
+    .on('mouseout',hideTip)
+    .on('click',(event,d)=>{
+      selectedCountry=selectedCountry===d.Country?null:d.Country;
+      selectedContinent=null; updateAll();
+    });
+
+  svg.append('text').attr('x',iW/2).attr('y',iH+42).attr('text-anchor','middle')
+    .attr('fill','#8b949e').attr('font-size',11).text('Test Positivity Rate (%) — Higher = fewer tests relative to cases');
+  svg.append('text').attr('transform','rotate(-90)').attr('x',-iH/2).attr('y',-42)
+    .attr('text-anchor','middle').attr('fill','#8b949e').attr('font-size',11).text('Death Rate (%)');
+
+  const lg = d3.select('#scatterLegend');
+  lg.html('');
+  Object.entries(CONT_COLORS).forEach(([c,col])=>{
+    lg.append('div').attr('class','legend-item')
+      .html(`<div class="legend-dot" style="background:${col}"></div>${c}`);
+  });
+}
+</script>
+</body>
+</html>

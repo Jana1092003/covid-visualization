@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COVID-19: Testing, Wealth & Mortality</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #0d1117;
+    color: #e6edf3;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .hero {
+    text-align: center;
+    padding: 60px 40px;
+    max-width: 900px;
+  }
+  .virus-icon { font-size: 80px; margin-bottom: 20px; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{transform:scale(1);} 50%{transform:scale(1.1);} }
+  h1 { font-size: 2.8rem; font-weight: 700; color: #58a6ff; margin-bottom: 12px; }
+  .subtitle { font-size: 1.2rem; color: #8b949e; margin-bottom: 50px; line-height: 1.6; }
+  .cards { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; }
+  .card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 16px;
+    padding: 36px 30px;
+    width: 340px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+  .card:hover {
+    border-color: #58a6ff;
+    transform: translateY(-6px);
+    box-shadow: 0 12px 40px rgba(88,166,255,0.15);
+  }
+  .card-icon { font-size: 2.5rem; margin-bottom: 16px; }
+  .card h2 { font-size: 1.2rem; color: #58a6ff; margin-bottom: 10px; }
+  .card p { font-size: 0.9rem; color: #8b949e; line-height: 1.6; }
+  .card .tag {
+    display: inline-block;
+    background: #1f6feb33;
+    color: #58a6ff;
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    margin-top: 14px;
+  }
+  .footer { margin-top: 60px; color: #484f58; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="virus-icon">🦠</div>
+  <h1>COVID-19 Global Analysis</h1>
+  <p class="subtitle">
+    Did wealthier nations handle COVID-19 better?<br>
+    Exploring the relationship between testing capacity, mortality rates, and continental disparities.
+  </p>
+  <div class="cards">
+    <a href="dashboard1.html" class="card">
+      <div class="card-icon">🌍</div>
+      <h2>Dashboard 1: Global Snapshot</h2>
+      <p>Explore how each country and continent performed at the peak of the pandemic. Compare testing rates vs death rates, and uncover geographic disparities.</p>
+      <span class="tag">Tests · Deaths · Continents</span>
+    </a>
+    <a href="dashboard2.html" class="card">
+      <div class="card-icon">📈</div>
+      <h2>Dashboard 2: Trends Over Time</h2>
+      <p>Track how the pandemic evolved across continents from January to July 2020. Identify waves, peaks, and divergence between regions.</p>
+      <span class="tag">Timeline · Waves · New Cases</span>
+    </a>
+  </div>
+  <div class="footer">Information Visualization Project · University of Haifa · 2025–2026</div>
+</div>
+</body>
+</html>
