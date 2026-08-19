@@ -56,6 +56,11 @@
     margin-top: 14px;
   }
   .footer { margin-top: 60px; color: #484f58; font-size: 0.85rem; }
+  .note {
+    margin-top: 20px;
+    font-size: 0.8rem;
+    color: #484f58;
+  }
 </style>
 </head>
 <body>
@@ -67,20 +72,42 @@
     Exploring the relationship between testing capacity, mortality rates, and continental disparities.
   </p>
   <div class="cards">
-    <a href="dashboard1.html" class="card">
+    <div class="card" onclick="openDashboard('dashboard1.html')">
       <div class="card-icon">🌍</div>
       <h2>Dashboard 1: Global Snapshot</h2>
-      <p>Explore how each country and continent performed at the peak of the pandemic. Compare testing rates vs death rates, and uncover geographic disparities.</p>
+      <p>Explore how each country and continent performed. Compare testing rates vs death rates, and uncover geographic disparities.</p>
       <span class="tag">Tests · Deaths · Continents</span>
-    </a>
-    <a href="dashboard2.html" class="card">
+    </div>
+    <div class="card" onclick="openDashboard('dashboard2.html')">
       <div class="card-icon">📈</div>
       <h2>Dashboard 2: Trends Over Time</h2>
       <p>Track how the pandemic evolved across continents from January to July 2020. Identify waves, peaks, and divergence between regions.</p>
       <span class="tag">Timeline · Waves · New Cases</span>
-    </a>
+    </div>
   </div>
   <div class="footer">Information Visualization Project · University of Haifa · 2025–2026</div>
+  <div class="note" id="noteEl"></div>
 </div>
+
+<script>
+function openDashboard(file) {
+  // Try direct navigation first
+  try {
+    window.location.href = file;
+  } catch(e) {
+    // If blocked, show instructions
+    document.getElementById('noteEl').innerHTML =
+      '⚠️ אם הדפדפן חוסם — פתחי את ' + file + ' ישירות';
+  }
+}
+
+// Auto-detect if running locally and show tip
+window.addEventListener('load', function() {
+  if (window.location.protocol === 'file:') {
+    document.getElementById('noteEl').innerHTML =
+      '💡 טיפ: אם הלחצנים לא עובדים — גרור את dashboard1.html או dashboard2.html ישירות לדפדפן';
+  }
+});
+</script>
 </body>
 </html>
